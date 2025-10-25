@@ -1,14 +1,16 @@
 import pulumi
 import pulumi_azure_native as azure
+from pulumi_azure_native import network
 from pulumi import Config, export, Output
 import base64
 
 config = Config()
 project_name = "cpe-autoscaling-demo"
-location = config.get("location") or "eastus"
+location = config.get("location") or "eastus"  # MySQL funciona en eastus
 admin_username = "azureuser"
 admin_password = config.require_secret("admin_password")
 db_password = config.require_secret("db_password")
+subscription_id = "1eb83675-114b-4f93-8921-f055b5bd6ea8"
 
 resource_group = azure.resources.ResourceGroup(
     f"{project_name}-rg",
@@ -40,8 +42,8 @@ db_subnet = azure.network.Subnet(
     subnet_name=f"{project_name}-db-subnet",
     delegations=[
         azure.network.DelegationArgs(
-            name="postgres-delegation",
-            service_name="Microsoft.DBforPostgreSQL/flexibleServers",
+            name="mysql-delegation",
+            service_name="Microsoft.DBforMySQL/flexibleServers",
         )
     ],
 )
@@ -66,43 +68,56 @@ load_balancer = azure.network.LoadBalancer(
             public_ip_address=azure.network.PublicIPAddressArgs(id=public_ip.id),
         )
     ],
+    backend_address_pools=[
+        azure.network.BackendAddressPoolArgs(
+            name=f"{project_name}-backend-pool",
+        )
+    ],
+    probes=[
+        azure.network.ProbeArgs(
+            name=f"{project_name}-health-probe",
+            protocol="Http",
+            port=5000,
+            request_path="/health",
+            interval_in_seconds=30,
+            number_of_probes=2,
+        )
+    ],
+    load_balancing_rules=[
+        azure.network.LoadBalancingRuleArgs(
+            name=f"{project_name}-lb-rule",
+            frontend_ip_configuration=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/frontendIPConfigurations/LoadBalancerFrontend"
+                )
+            ),
+            backend_address_pool=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/backendAddressPools/", f"{project_name}-backend-pool"
+                )
+            ),
+            probe=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/probes/", f"{project_name}-health-probe"
+                )
+            ),
+            protocol="Tcp",
+            frontend_port=80,
+            backend_port=5000,
+            enable_floating_ip=False,
+            idle_timeout_in_minutes=4,
+        )
+    ],
     load_balancer_name=f"{project_name}-lb",
-)
-
-backend_pool = azure.network.LoadBalancerBackendAddressPool(
-    f"{project_name}-backend-pool",
-    resource_group_name=resource_group.name,
-    load_balancer_name=load_balancer.name,
-    backend_address_pool_name=f"{project_name}-backend-pool",
-)
-
-health_probe = azure.network.LoadBalancerProbe(
-    f"{project_name}-health-probe",
-    resource_group_name=resource_group.name,
-    load_balancer_name=load_balancer.name,
-    protocol="Http",
-    port=5000,
-    request_path="/health",
-    interval_in_seconds=30,
-    number_of_probes=2,
-    probe_name=f"{project_name}-health-probe",
-)
-
-lb_rule = azure.network.LoadBalancingRule(
-    f"{project_name}-lb-rule",
-    resource_group_name=resource_group.name,
-    load_balancer_name=load_balancer.name,
-    protocol="Tcp",
-    frontend_port=80,
-    backend_port=5000,
-    frontend_ip_configuration=azure.network.SubResourceArgs(
-        id=load_balancer.frontend_ip_configurations.apply(lambda configs: configs[0].id),
-    ),
-    backend_address_pool=azure.network.SubResourceArgs(id=backend_pool.id),
-    probe=azure.network.SubResourceArgs(id=health_probe.id),
-    enable_floating_ip=False,
-    idle_timeout_in_minutes=4,
-    load_balancing_rule_name=f"{project_name}-lb-rule",
 )
 
 nsg = azure.network.NetworkSecurityGroup(
@@ -147,48 +162,30 @@ nsg = azure.network.NetworkSecurityGroup(
     network_security_group_name=f"{project_name}-nsg",
 )
 
-postgres_dns_zone = azure.network.PrivateZone(
-    f"{project_name}-postgres-dns",
-    resource_group_name=resource_group.name,
-    location="Global",
-    private_zone_name=f"{project_name}.postgres.database.azure.com",
-)
-
-dns_vnet_link = azure.network.VirtualNetworkLink(
-    f"{project_name}-dns-vnet-link",
-    resource_group_name=resource_group.name,
-    private_zone_name=postgres_dns_zone.name,
-    location="Global",
-    virtual_network=azure.network.SubResourceArgs(id=vnet.id),
-    registration_enabled=False,
-    virtual_network_link_name=f"{project_name}-dns-vnet-link",
-)
-
-postgres_server = azure.dbforpostgresql.Server(
-    f"{project_name}-postgres",
+# MySQL Flexible Server (más económico que PostgreSQL)
+mysql_server = azure.dbformysql.FlexibleServer(
+    f"{project_name}-mysql",
     resource_group_name=resource_group.name,
     location=location,
-    server_name=f"{project_name}-postgres",
+    server_name=f"{project_name}-mysql",
     administrator_login="autoscaling_user",
     administrator_login_password=db_password,
-    version="15",
-    sku=azure.dbforpostgresql.SkuArgs(name="Standard_B1ms", tier="Burstable"),
-    storage=azure.dbforpostgresql.StorageArgs(storage_size_gb=32),
-    network=azure.dbforpostgresql.NetworkArgs(
-        delegated_subnet_resource_id=db_subnet.id,
-        private_dns_zone_arm_resource_id=postgres_dns_zone.id,
+    version="8.0.21",
+    sku=azure.dbformysql.SkuArgs(
+        name="Standard_B1s",
+        tier="Burstable"
     ),
-    high_availability=azure.dbforpostgresql.HighAvailabilityArgs(mode="Disabled"),
-    backup=azure.dbforpostgresql.BackupArgs(backup_retention_days=7, geo_redundant_backup="Disabled"),
+    storage=azure.dbformysql.StorageArgs(storage_size_gb=20),
+    backup=azure.dbformysql.BackupArgs(backup_retention_days=7, geo_redundant_backup="Disabled"),
 )
 
-postgres_database = azure.dbforpostgresql.Database(
+mysql_database = azure.dbformysql.Database(
     f"{project_name}-db",
     resource_group_name=resource_group.name,
-    server_name=postgres_server.name,
+    server_name=mysql_server.name,
     database_name="autoscaling",
-    charset="UTF8",
-    collation="en_US.utf8",
+    charset="utf8mb4",
+    collation="utf8mb4_general_ci",
 )
 
 def create_user_data(db_info):
@@ -220,34 +217,15 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Configurar variables de entorno
+# Configurar variables de entorno para MySQL
 cat > .env << 'EOFENV'
 DB_HOST={db_host}
-DB_PORT=5432
+DB_PORT=3306
 DB_NAME=autoscaling
 DB_USER=autoscaling_user
 DB_PASSWORD={db_pass}
 FLASK_ENV=production
 EOFENV
-
-# Modificar app.py para usar variables de entorno
-cat > app_config.py << 'EOFCONFIG'
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DB_CONFIG = {{
-    'host': os.getenv('DB_HOST'),
-    'port': int(os.getenv('DB_PORT', 5432)),
-    'database': os.getenv('DB_NAME'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD')
-}}
-EOFCONFIG
-
-# Instalar python-dotenv
-pip install python-dotenv
 
 # Ejecutar aplicación
 nohup python3 app.py > /var/log/flask-app.log 2>&1 &
@@ -256,7 +234,7 @@ echo "User-data script completed successfully at $(date)"
 """
     return user_data_script
 
-user_data_output = Output.all(postgres_server.fully_qualified_domain_name, db_password).apply(create_user_data)
+user_data_output = Output.all(mysql_server.fully_qualified_domain_name, db_password).apply(create_user_data)
 user_data_base64 = user_data_output.apply(lambda ud: base64.b64encode(ud.encode()).decode())
 
 vmss = azure.compute.VirtualMachineScaleSet(
@@ -296,7 +274,16 @@ vmss = azure.compute.VirtualMachineScaleSet(
                         azure.compute.VirtualMachineScaleSetIPConfigurationArgs(
                             name=f"{project_name}-ip-config",
                             subnet=azure.compute.ApiEntityReferenceArgs(id=vm_subnet.id),
-                            load_balancer_backend_address_pools=[azure.compute.SubResourceArgs(id=backend_pool.id)],
+                            load_balancer_backend_address_pools=[
+                                azure.compute.SubResourceArgs(
+                                    id=Output.concat(
+                                        "/subscriptions/", subscription_id,
+                                        "/resourceGroups/", resource_group.name,
+                                        "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                                        "/backendAddressPools/", f"{project_name}-backend-pool"
+                                    )
+                                )
+                            ],
                         )
                     ],
                     network_security_group=azure.compute.SubResourceArgs(id=nsg.id),
@@ -306,7 +293,7 @@ vmss = azure.compute.VirtualMachineScaleSet(
     ),
 )
 
-autoscale_setting = azure.insights.AutoscaleSetting(
+autoscale_setting = azure.monitor.AutoscaleSetting(
     f"{project_name}-autoscale",
     resource_group_name=resource_group.name,
     location=location,
@@ -314,12 +301,12 @@ autoscale_setting = azure.insights.AutoscaleSetting(
     target_resource_uri=vmss.id,
     enabled=True,
     profiles=[
-        azure.insights.AutoscaleProfileArgs(
+        azure.monitor.AutoscaleProfileArgs(
             name="Default-Profile",
-            capacity=azure.insights.ScaleCapacityArgs(minimum="1", maximum="3", default="1"),
+            capacity=azure.monitor.ScaleCapacityArgs(minimum="1", maximum="3", default="1"),
             rules=[
-                azure.insights.ScaleRuleArgs(
-                    metric_trigger=azure.insights.MetricTriggerArgs(
+                azure.monitor.ScaleRuleArgs(
+                    metric_trigger=azure.monitor.MetricTriggerArgs(
                         metric_name="Percentage CPU",
                         metric_resource_uri=vmss.id,
                         time_grain="PT1M",
@@ -329,15 +316,15 @@ autoscale_setting = azure.insights.AutoscaleSetting(
                         operator="GreaterThan",
                         threshold=70,
                     ),
-                    scale_action=azure.insights.ScaleActionArgs(
+                    scale_action=azure.monitor.ScaleActionArgs(
                         direction="Increase",
                         type="ChangeCount",
                         value="1",
                         cooldown="PT5M",
                     ),
                 ),
-                azure.insights.ScaleRuleArgs(
-                    metric_trigger=azure.insights.MetricTriggerArgs(
+                azure.monitor.ScaleRuleArgs(
+                    metric_trigger=azure.monitor.MetricTriggerArgs(
                         metric_name="Percentage CPU",
                         metric_resource_uri=vmss.id,
                         time_grain="PT1M",
@@ -347,7 +334,7 @@ autoscale_setting = azure.insights.AutoscaleSetting(
                         operator="LessThan",
                         threshold=30,
                     ),
-                    scale_action=azure.insights.ScaleActionArgs(
+                    scale_action=azure.monitor.ScaleActionArgs(
                         direction="Decrease",
                         type="ChangeCount",
                         value="1",
@@ -362,6 +349,6 @@ autoscale_setting = azure.insights.AutoscaleSetting(
 export("resource_group_name", resource_group.name)
 export("load_balancer_ip", public_ip.ip_address)
 export("load_balancer_url", Output.concat("http://", public_ip.ip_address))
-export("postgres_server", postgres_server.fully_qualified_domain_name)
+export("mysql_server", mysql_server.fully_qualified_domain_name)
 export("vmss_name", vmss.name)
 export("location", location)

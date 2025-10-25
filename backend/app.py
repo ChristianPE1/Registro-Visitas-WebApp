@@ -14,20 +14,20 @@ IS_PRODUCTION = os.getenv('FLASK_ENV') == 'production'
 INSTANCE_ID = socket.gethostname()
 
 if IS_PRODUCTION:
-    # PostgreSQL en producción
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
+    # MySQL en producción
+    import mysql.connector
+    from mysql.connector import Error
     
     DB_CONFIG = {
         'host': os.getenv('DB_HOST'),
-        'port': int(os.getenv('DB_PORT', 5432)),
+        'port': int(os.getenv('DB_PORT', 3306)),
         'database': os.getenv('DB_NAME'),
         'user': os.getenv('DB_USER'),
         'password': os.getenv('DB_PASSWORD')
     }
     
     def get_db_connection():
-        return psycopg2.connect(**DB_CONFIG)
+        return mysql.connector.connect(**DB_CONFIG)
     
     def init_db():
         try:
@@ -35,7 +35,7 @@ if IS_PRODUCTION:
             cursor = conn.cursor()
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS visits (
-                    id SERIAL PRIMARY KEY,
+                    id INT AUTO_INCREMENT PRIMARY KEY,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     ip_address VARCHAR(45),
                     instance_id VARCHAR(100)
@@ -44,8 +44,8 @@ if IS_PRODUCTION:
             conn.commit()
             cursor.close()
             conn.close()
-            print("PostgreSQL database initialized successfully")
-        except Exception as e:
+            print("MySQL database initialized successfully")
+        except Error as e:
             print(f"Error initializing database: {e}")
 else:
     # SQLite en desarrollo
@@ -85,13 +85,9 @@ def health():
     """Health check endpoint"""
     try:
         conn = get_db_connection()
-        if IS_PRODUCTION:
-            cursor = conn.cursor()
-            cursor.execute('SELECT 1')
-            cursor.close()
-        else:
-            cursor = conn.cursor()
-            cursor.execute('SELECT 1')
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1')
+        cursor.close()
         conn.close()
         
         return jsonify({
@@ -99,6 +95,7 @@ def health():
             'timestamp': datetime.now().isoformat(),
             'instance_id': INSTANCE_ID,
             'database': 'connected',
+            'db_type': 'mysql' if IS_PRODUCTION else 'sqlite',
             'environment': 'production' if IS_PRODUCTION else 'development'
         }), 200
     except Exception as e:
@@ -115,17 +112,18 @@ def register_visit():
         ip_address = request.remote_addr
         
         conn = get_db_connection()
+        cursor = conn.cursor()
+        
         if IS_PRODUCTION:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(
                 'INSERT INTO visits (ip_address, instance_id) VALUES (%s, %s)',
                 (ip_address, INSTANCE_ID)
             )
             conn.commit()
             cursor.execute('SELECT COUNT(*) as count FROM visits')
-            total = cursor.fetchone()['count']
+            result = cursor.fetchone()
+            total = result[0] if result else 0
         else:
-            cursor = conn.cursor()
             cursor.execute(
                 'INSERT INTO visits (ip_address, instance_id) VALUES (?, ?)',
                 (ip_address, INSTANCE_ID)
@@ -154,14 +152,16 @@ def get_visits():
     """Obtiene el total de visitas"""
     try:
         conn = get_db_connection()
+        cursor = conn.cursor()
+        
         if IS_PRODUCTION:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute('SELECT COUNT(*) as count FROM visits')
-            total = cursor.fetchone()['count']
+            result = cursor.fetchone()
+            total = result[0] if result else 0
             cursor.execute('SELECT * FROM visits ORDER BY timestamp DESC LIMIT 10')
-            recent = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            recent = [dict(zip(columns, row)) for row in cursor.fetchall()]
         else:
-            cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) as count FROM visits')
             total = cursor.fetchone()['count']
             cursor.execute('SELECT * FROM visits ORDER BY timestamp DESC LIMIT 10')
