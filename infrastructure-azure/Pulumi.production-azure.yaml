@@ -1,0 +1,7 @@
+config:
+  autoscaling-demo-azure:db_password:
+    secure: AAABAOA9oE4eV95RhsmKgMFyZ+2JvYnkAibIzVsgu6ch11fLdtUg+jxc58nXp9A=
+  autoscaling-demo-azure:admin_password:
+    secure: AAABANQPpeyThxLEDJzInE5OJNtIKKaCU/4IFKTMujjHZeZ/jBL7cAL0o+R+/jk=
+  azure-native:subscriptionId: 1eb83675-114b-4f93-8921-f055b5bd6ea8
+  autoscaling-demo-azure:location: eastus

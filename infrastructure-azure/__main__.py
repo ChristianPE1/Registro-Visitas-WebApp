@@ -6,7 +6,7 @@ import base64
 
 config = Config()
 project_name = "cpe-autoscaling-demo"
-location = config.get("location") or "eastus"  # MySQL funciona en eastus
+location = config.get("location") or "eastus"
 admin_username = "azureuser"
 admin_password = config.require_secret("admin_password")
 db_password = config.require_secret("db_password")
@@ -40,12 +40,6 @@ db_subnet = azure.network.Subnet(
     virtual_network_name=vnet.name,
     address_prefix="10.0.2.0/24",
     subnet_name=f"{project_name}-db-subnet",
-    delegations=[
-        azure.network.DelegationArgs(
-            name="mysql-delegation",
-            service_name="Microsoft.DBforMySQL/flexibleServers",
-        )
-    ],
 )
 
 public_ip = azure.network.PublicIPAddress(
@@ -162,21 +156,37 @@ nsg = azure.network.NetworkSecurityGroup(
     network_security_group_name=f"{project_name}-nsg",
 )
 
-# MySQL Flexible Server (más económico que PostgreSQL)
-mysql_server = azure.dbformysql.FlexibleServer(
+# MySQL Server (versión clásica - más simple y económica)
+mysql_server = azure.dbformysql.Server(
     f"{project_name}-mysql",
     resource_group_name=resource_group.name,
     location=location,
     server_name=f"{project_name}-mysql",
     administrator_login="autoscaling_user",
     administrator_login_password=db_password,
-    version="8.0.21",
+    version="8.0",
     sku=azure.dbformysql.SkuArgs(
-        name="Standard_B1s",
-        tier="Burstable"
+        name="B_Gen5_1",  # Basic tier, 1 vCore
+        tier="Basic",
+        capacity=1,
+        family="Gen5"
     ),
-    storage=azure.dbformysql.StorageArgs(storage_size_gb=20),
-    backup=azure.dbformysql.BackupArgs(backup_retention_days=7, geo_redundant_backup="Disabled"),
+    storage_profile=azure.dbformysql.StorageProfileArgs(
+        storage_mb=5120,  # 5 GB (mínimo)
+        backup_retention_days=7,
+        geo_redundant_backup="Disabled"
+    ),
+    ssl_enforcement="Disabled",  # Simplificar conexión
+)
+
+# Firewall rule para permitir acceso desde Azure VMs
+mysql_firewall = azure.dbformysql.FirewallRule(
+    f"{project_name}-mysql-fw",
+    resource_group_name=resource_group.name,
+    server_name=mysql_server.name,
+    firewall_rule_name="AllowAzureServices",
+    start_ip_address="0.0.0.0",
+    end_ip_address="0.0.0.0",  # Permite servicios de Azure
 )
 
 mysql_database = azure.dbformysql.Database(

@@ -1,2 +1,4 @@
 config:
   azure-native:location: WestUS2
+  autoscaling-demo-azure:admin_password:
+    secure: AAABAHub8MQKfWxqbmyeyORoqBZw4HsmHjmNpru8Gn0Ff51PhaglmN9SmrutFSA=
