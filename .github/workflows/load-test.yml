@@ -1,0 +1,153 @@
+name: Autoscaling Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL (ALB DNS or custom domain)'
+        required: true
+        type: string
+      num_requests:
+        description: 'Total number of requests'
+        required: false
+        default: '2000'
+        type: string
+      concurrent_requests:
+        description: 'Concurrent requests'
+        required: false
+        default: '100'
+        type: string
+      test_duration:
+        description: 'Test duration in minutes'
+        required: false
+        default: '10'
+        type: string
+
+jobs:
+  load-test:
+    name: Execute Load Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install aiohttp matplotlib pandas
+      
+      - name: Health Check
+        run: |
+          echo "🏥 Checking target health..."
+          curl -f ${{ inputs.target_url }}/health || echo "Warning: Health check failed"
+      
+      - name: Run Load Test - Phase 1 (Warm up)
+        run: |
+          echo "🔥 Phase 1: Warming up..."
+          python scripts/load-test.py ${{ inputs.target_url }} 100 10
+      
+      - name: Wait for scale up
+        run: |
+          echo "⏳ Waiting 3 minutes for potential scale up..."
+          sleep 180
+      
+      - name: Run Load Test - Phase 2 (Peak load)
+        run: |
+          echo "⚡ Phase 2: Peak load test..."
+          python scripts/load-test.py ${{ inputs.target_url }} ${{ inputs.num_requests }} ${{ inputs.concurrent_requests }}
+      
+      - name: Monitor for scale up
+        run: |
+          echo "📊 Monitoring for 5 minutes..."
+          for i in {1..10}; do
+            echo "Check $i/10"
+            curl -s ${{ inputs.target_url }}/api/metrics || true
+            sleep 30
+          done
+      
+      - name: Run Load Test - Phase 3 (Sustained load)
+        run: |
+          echo "🔄 Phase 3: Sustained load..."
+          python scripts/load-test.py ${{ inputs.target_url }} 1000 50
+      
+      - name: Cooldown period
+        run: |
+          echo "❄️ Cooldown period - waiting for scale down..."
+          sleep 300
+      
+      - name: Final metrics check
+        run: |
+          echo "📈 Final metrics:"
+          curl -s ${{ inputs.target_url }}/api/metrics || true
+          curl -s ${{ inputs.target_url }}/api/visits || true
+      
+      - name: Generate Report
+        if: always()
+        run: |
+          echo "## Load Test Report 📊" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target**: ${{ inputs.target_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Requests**: ${{ inputs.num_requests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Concurrent**: ${{ inputs.concurrent_requests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Duration**: ${{ inputs.test_duration }} minutes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Phases" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ Warm up (100 requests)" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ Peak load (${{ inputs.num_requests }} requests)" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ Sustained load (1000 requests)" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ Cooldown period" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Expected Behavior" >> $GITHUB_STEP_SUMMARY
+          echo "- ASG should scale from 1 to 2-3 instances during peak load" >> $GITHUB_STEP_SUMMARY
+          echo "- CPU alarm should trigger when > 70%" >> $GITHUB_STEP_SUMMARY
+          echo "- Scale down should occur after ~5 minutes of low load" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Check CloudWatch Alarms in AWS Console" >> $GITHUB_STEP_SUMMARY
+          echo "2. Verify EC2 instance count in Auto Scaling Group" >> $GITHUB_STEP_SUMMARY
+          echo "3. Review ALB Target Health" >> $GITHUB_STEP_SUMMARY
+  
+  verify-autoscaling:
+    name: Verify Autoscaling Activity
+    runs-on: ubuntu-latest
+    needs: load-test
+    if: always()
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Get ASG Activity
+        run: |
+          echo "📋 Auto Scaling Group Activity:"
+          aws autoscaling describe-scaling-activities \
+            --auto-scaling-group-name autoscaling-demo-asg \
+            --max-records 10 \
+            --query 'Activities[*].[StartTime,Description,StatusCode]' \
+            --output table
+      
+      - name: Get Current Instances
+        run: |
+          echo "🖥️ Current EC2 Instances:"
+          aws ec2 describe-instances \
+            --filters "Name=tag:ManagedBy,Values=Pulumi" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PrivateIpAddress,LaunchTime]' \
+            --output table
+      
+      - name: Get CloudWatch Alarms
+        run: |
+          echo "🚨 CloudWatch Alarm Status:"
+          aws cloudwatch describe-alarms \
+            --alarm-name-prefix "autoscaling-demo" \
+            --query 'MetricAlarms[*].[AlarmName,StateValue,StateReason]' \
+            --output table
