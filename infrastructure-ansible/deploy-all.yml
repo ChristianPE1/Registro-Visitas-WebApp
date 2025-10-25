@@ -1,0 +1,45 @@
+---
+# Playbook principal que ejecuta todos los despliegues en orden
+
+- name: Complete Azure Infrastructure Deployment
+  hosts: localhost
+  gather_facts: true
+  collections:
+    - azure.azcollection
+
+  tasks:
+    - name: Display deployment banner
+      debug:
+        msg:
+          - "=========================================="
+          - "   Azure Infrastructure Deployment"
+          - "   Project: {{ project_name }}"
+          - "   Environment: {{ env_name }}"
+          - "=========================================="
+
+- import_playbook: deploy-infrastructure.yml
+- import_playbook: deploy-mysql.yml
+- import_playbook: deploy-apps.yml
+
+- name: Final Summary
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Display final summary
+      debug:
+        msg:
+          - ""
+          - "=========================================="
+          - "   Deployment Complete!"
+          - "=========================================="
+          - ""
+          - "Access your applications:"
+          - "  Frontend: https://{{ frontend_app_name }}.azurewebsites.net"
+          - "  Backend:  https://{{ backend_app_name }}.azurewebsites.net"
+          - ""
+          - "Resource Group: {{ resource_group_name }}"
+          - "Location: {{ location }}"
+          - ""
+          - "Check Azure Portal for detailed monitoring"
+          - "=========================================="

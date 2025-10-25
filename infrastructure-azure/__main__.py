@@ -6,7 +6,7 @@ import base64
 
 config = Config()
 project_name = "cpe-autoscaling-demo"
-location = config.get("location") or "eastus"
+location = config.get("location") or "westus"  # PostgreSQL disponible en West US
 admin_username = "azureuser"
 admin_password = config.require_secret("admin_password")
 db_password = config.require_secret("db_password")
@@ -156,28 +156,75 @@ nsg = azure.network.NetworkSecurityGroup(
     network_security_group_name=f"{project_name}-nsg",
 )
 
-# MySQL Server (versión clásica - más simple y económica)
-mysql_server = azure.dbformysql.Server(
-    f"{project_name}-mysql",
+# PostgreSQL Server (B1ms - Burstable, 1 vCore, 2 GiB RAM, 32 GiB storage)
+postgres_server = azure.dbforpostgresql.Server(
+    f"{project_name}-postgres",
     resource_group_name=resource_group.name,
     location=location,
-    server_name=f"{project_name}-mysql",
+    server_name=f"{project_name}-postgres",
     administrator_login="autoscaling_user",
     administrator_login_password=db_password,
-    version="8.0",
-    sku=azure.dbformysql.SkuArgs(
-        name="B_Gen5_1",  # Basic tier, 1 vCore
+    version="11",  # PostgreSQL 11
+    sku=azure.dbforpostgresql.SkuArgs(
+        name="B_Gen5_1",  # Burstable, Gen5, 1 vCore
         tier="Basic",
         capacity=1,
         family="Gen5"
     ),
-    storage_profile=azure.dbformysql.StorageProfileArgs(
-        storage_mb=5120,  # 5 GB (mínimo)
-        backup_retention_days=7,
-        geo_redundant_backup="Disabled"
-    ),
-    ssl_enforcement="Disabled",  # Simplificar conexión
+    storage_mb=32768,  # 32 GiB
+    backup_retention_days=7,
+    geo_redundant_backup="Disabled",
+    ssl_enforcement="Enabled",
 )
+
+# Firewall rule para permitir servicios de Azure
+postgres_firewall = azure.dbforpostgresql.FirewallRule(
+    f"{project_name}-postgres-fw",
+    resource_group_name=resource_group.name,
+    server_name=postgres_server.name,
+    firewall_rule_name="AllowAzureServices",
+    start_ip_address="0.0.0.0",
+    end_ip_address="0.0.0.0",
+)
+
+postgres_database = azure.dbforpostgresql.Database(
+    f"{project_name}-db",
+    resource_group_name=resource_group.name,
+    server_name=postgres_server.name,
+    database_name="autoscaling",
+    charset="UTF8",
+    collation="English_United States.1252",
+)
+
+# MySQL Server (versión clásica - más simple y económica)
+mysql_server = azure.dbformysql.FlexibleServer(
+    f"{project_name}-mysql",
+    resource_group_name=resource_group.name,
+    location=location,
+    administrator_login="autoscaling_user",
+    administrator_login_password=db_password,
+    version="8.0.21",
+    sku=azure.dbformysql.SkuArgs(
+        name="Standard_B1ms",
+        tier="Burstable",
+        family="Gen5",
+        capacity=1,
+    ),
+    storage=azure.dbformysql.StorageArgs(
+        storage_size_gb=20,
+        auto_grow="Enabled",
+        iops=100,
+    ),
+    network=azure.dbformysql.NetworkArgs(
+        delegated_subnet_resource_id=db_subnet.id,
+        public_network_access="Enabled",
+    ),
+    backup=azure.dbformysql.BackupArgs(
+        backup_retention_days=7,
+        geo_redundant_backup="Disabled",
+    ),
+)
+
 
 # Firewall rule para permitir acceso desde Azure VMs
 mysql_firewall = azure.dbformysql.FirewallRule(
@@ -197,6 +244,7 @@ mysql_database = azure.dbformysql.Database(
     charset="utf8mb4",
     collation="utf8mb4_general_ci",
 )
+
 
 def create_user_data(db_info):
     db_host = db_info[0]
@@ -227,12 +275,12 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Configurar variables de entorno para MySQL
+# Configurar variables de entorno para PostgreSQL
 cat > .env << 'EOFENV'
 DB_HOST={db_host}
-DB_PORT=3306
+DB_PORT=5432
 DB_NAME=autoscaling
-DB_USER=autoscaling_user
+DB_USER=autoscaling_user@{db_host}
 DB_PASSWORD={db_pass}
 FLASK_ENV=production
 EOFENV
@@ -244,7 +292,7 @@ echo "User-data script completed successfully at $(date)"
 """
     return user_data_script
 
-user_data_output = Output.all(mysql_server.fully_qualified_domain_name, db_password).apply(create_user_data)
+user_data_output = Output.all(postgres_server.fully_qualified_domain_name, db_password).apply(create_user_data)
 user_data_base64 = user_data_output.apply(lambda ud: base64.b64encode(ud.encode()).decode())
 
 vmss = azure.compute.VirtualMachineScaleSet(
@@ -359,6 +407,6 @@ autoscale_setting = azure.monitor.AutoscaleSetting(
 export("resource_group_name", resource_group.name)
 export("load_balancer_ip", public_ip.ip_address)
 export("load_balancer_url", Output.concat("http://", public_ip.ip_address))
-export("mysql_server", mysql_server.fully_qualified_domain_name)
+export("postgres_server", postgres_server.fully_qualified_domain_name)
 export("vmss_name", vmss.name)
 export("location", location)

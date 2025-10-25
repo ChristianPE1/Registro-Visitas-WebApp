@@ -1,0 +1,37 @@
+---
+# Playbook para destruir toda la infraestructura
+
+- name: Destroy Azure Infrastructure
+  hosts: localhost
+  gather_facts: true
+  collections:
+    - azure.azcollection
+  
+  tasks:
+    - name: Warning message
+      debug:
+        msg:
+          - "=========================================="
+          - "   WARNING: DESTROYING INFRASTRUCTURE"
+          - "   Resource Group: {{ resource_group_name }}"
+          - "=========================================="
+
+    - name: Pause for confirmation
+      pause:
+        prompt: "Are you sure you want to delete all resources? Press Ctrl+C to cancel, or Enter to continue"
+      when: not (auto_approve | default(false) | bool)
+
+    - name: Delete Resource Group (this will delete all resources)
+      azure_rm_resourcegroup:
+        name: "{{ resource_group_name }}"
+        state: absent
+        force_delete_nonempty: true
+      register: rg_delete
+      async: 3600
+      poll: 30
+
+    - name: Display destruction result
+      debug:
+        msg:
+          - "Resource Group '{{ resource_group_name }}' and all its resources have been deleted"
+          - "Destruction completed successfully"

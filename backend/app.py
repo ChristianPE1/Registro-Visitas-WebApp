@@ -14,20 +14,20 @@ IS_PRODUCTION = os.getenv('FLASK_ENV') == 'production'
 INSTANCE_ID = socket.gethostname()
 
 if IS_PRODUCTION:
-    # MySQL en producción
-    import mysql.connector
-    from mysql.connector import Error
+    # PostgreSQL en producción
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
     
     DB_CONFIG = {
         'host': os.getenv('DB_HOST'),
-        'port': int(os.getenv('DB_PORT', 3306)),
+        'port': int(os.getenv('DB_PORT', 5432)),
         'database': os.getenv('DB_NAME'),
         'user': os.getenv('DB_USER'),
         'password': os.getenv('DB_PASSWORD')
     }
     
     def get_db_connection():
-        return mysql.connector.connect(**DB_CONFIG)
+        return psycopg2.connect(**DB_CONFIG)
     
     def init_db():
         try:
@@ -35,7 +35,7 @@ if IS_PRODUCTION:
             cursor = conn.cursor()
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS visits (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     ip_address VARCHAR(45),
                     instance_id VARCHAR(100)
@@ -44,8 +44,8 @@ if IS_PRODUCTION:
             conn.commit()
             cursor.close()
             conn.close()
-            print("MySQL database initialized successfully")
-        except Error as e:
+            print("PostgreSQL database initialized successfully")
+        except Exception as e:
             print(f"Error initializing database: {e}")
 else:
     # SQLite en desarrollo
