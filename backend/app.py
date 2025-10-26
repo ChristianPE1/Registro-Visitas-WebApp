@@ -112,9 +112,19 @@ def health():
 
 @app.route('/api/visit', methods=['POST'])
 def register_visit():
-    """Registra una visita"""
+    """
+    Registra una visita con validación y procesamiento intensivo.
+    Simula operaciones reales de escritura en BD con validaciones.
+    """
     try:
         ip_address = request.remote_addr
+        
+        # Simular validaciones y procesamiento intensivo
+        # (verificación de spam, geolocalización, análisis de patrones)
+        import hashlib
+        validation_hash = hashlib.sha256(ip_address.encode()).hexdigest()
+        for _ in range(10000):
+            _ = hashlib.md5(validation_hash.encode()).hexdigest()
         
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -144,7 +154,8 @@ def register_visit():
             'message': 'Visit registered',
             'total_visits': total,
             'ip': ip_address,
-            'instance_id': INSTANCE_ID
+            'instance_id': INSTANCE_ID,
+            'validation': validation_hash[:16]
         }), 201
     except Exception as e:
         return jsonify({
@@ -154,8 +165,18 @@ def register_visit():
 
 @app.route('/api/visits', methods=['GET'])
 def get_visits():
-    """Obtiene el total de visitas"""
+    """
+    Obtiene el total de visitas con procesamiento adicional.
+    Este endpoint hace cálculos intensivos para generar estadísticas.
+    """
     try:
+        # Hacer cálculos intensivos para simular carga real
+        # (análisis de datos, generación de reportes, etc.)
+        import hashlib
+        computation_result = 0
+        for i in range(50000):
+            computation_result += int(hashlib.md5(str(i).encode()).hexdigest()[:8], 16) % 1000
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -178,7 +199,8 @@ def get_visits():
         return jsonify({
             'total_visits': total,
             'recent_visits': recent,
-            'instance_id': INSTANCE_ID
+            'instance_id': INSTANCE_ID,
+            'computation_hash': computation_result
         }), 200
     except Exception as e:
         return jsonify({
