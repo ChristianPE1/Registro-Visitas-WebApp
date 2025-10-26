@@ -309,7 +309,7 @@ postgres_server = azure.dbforpostgresql.Server(
     administrator_login_password=db_password,
     version=azure.dbforpostgresql.ServerVersion.SERVER_VERSION_13,
     sku=azure.dbforpostgresql.SkuArgs(
-        name="Standard_B1s",
+        name="Standard_B1ms",
         tier=azure.dbforpostgresql.SkuTier.BURSTABLE
     ),
     storage=azure.dbforpostgresql.StorageArgs(

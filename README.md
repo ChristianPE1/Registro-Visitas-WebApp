@@ -1,130 +1,258 @@
-# Cloud Autoscaling Demonstration System# Sistema de Registro de Visitas con Autoscaling# 🚀 Sistema de Autoscaling Demo
+# Sistema de Autoscaling en Azure# Cloud Autoscaling Demonstration System# Sistema de Registro de Visitas con Autoscaling# 🚀 Sistema de Autoscaling Demo
 
 
 
-## Project Overview
+Demostración de autoscaling horizontal en Azure usando Pulumi (IaC Open Source).
 
 
 
-This project demonstrates horizontal autoscaling implementation on Azure cloud infrastructure using Infrastructure as Code (IaC) principles. The system automatically scales compute resources based on CPU utilization metrics, providing a practical example of cloud elasticity and resource optimization.Sistema web full-stack que demuestra autoscaling horizontal mediante el registro de visitas web. Implementado con Flask (backend), React (frontend), PostgreSQL (base de datos compartida) y despliegue en Azure usando Infraestructura como Código (Pulumi).Aplicación full stack ligera diseñada para demostrar autoscaling en proveedores cloud usando herramientas IaC open source.
+## Stack Tecnológico## Project Overview
 
 
 
-## Technology Stack
+- **IaC**: Pulumi (Python SDK, Open Source)
 
+- **Cloud**: Microsoft Azure
 
+- **Aplicación**: Flask (Python 3.11)This project demonstrates horizontal autoscaling implementation on Azure cloud infrastructure using Infrastructure as Code (IaC) principles. The system automatically scales compute resources based on CPU utilization metrics, providing a practical example of cloud elasticity and resource optimization.Sistema web full-stack que demuestra autoscaling horizontal mediante el registro de visitas web. Implementado con Flask (backend), React (frontend), PostgreSQL (base de datos compartida) y despliegue en Azure usando Infraestructura como Código (Pulumi).Aplicación full stack ligera diseñada para demostrar autoscaling en proveedores cloud usando herramientas IaC open source.
 
-### Infrastructure## Arquitectura## 📋 Stack Tecnológico
-
-- **IaC Tool**: Pulumi (Open Source, Python SDK)
-
-- **Cloud Provider**: Microsoft Azure
+- **Base de Datos**: PostgreSQL Flexible Server
 
 - **Compute**: Virtual Machine Scale Sets (VMSS)
 
+- **Balanceo**: Azure Load Balancer Standard
+
+- **Monitoreo**: Azure Monitor con reglas de autoscaling## Technology Stack
+
+
+
+## Arquitectura
+
+
+
+La solución despliega los siguientes componentes:### Infrastructure## Arquitectura## 📋 Stack Tecnológico
+
+
+
+- Virtual Network con subnet dedicada- **IaC Tool**: Pulumi (Open Source, Python SDK)
+
+- Load Balancer con IP pública
+
+- VM Scale Set (1-3 instancias Ubuntu 22.04)- **Cloud Provider**: Microsoft Azure
+
+- PostgreSQL Flexible Server
+
+- Network Security Group con reglas de firewall- **Compute**: Virtual Machine Scale Sets (VMSS)
+
+- Azure Monitor para autoscaling basado en CPU
+
 - **Database**: PostgreSQL Flexible Server```- **Backend**: Flask (Python) - API REST ligera
+
+## Configuración de Autoscaling
 
 - **Load Balancing**: Azure Load Balancer (Standard SKU)
 
-- **Networking**: Virtual Network with NAT GatewayInternet → Azure Load Balancer (puerto 80 → 5000)- **Frontend**: React + Vite - Interfaz moderna y rápida
+- **Scale-Out**: CPU > 70% por 5 minutos → Agregar 1 instancia
+
+- **Scale-In**: CPU < 30% por 5 minutos → Eliminar 1 instancia- **Networking**: Virtual Network with NAT GatewayInternet → Azure Load Balancer (puerto 80 → 5000)- **Frontend**: React + Vite - Interfaz moderna y rápida
+
+- **Capacidad**: Mínimo 1, Máximo 3 instancias
+
+- **Cooldown**: 5 minutos entre operaciones
 
 
 
-### Application                    ↓- **Base de datos**: SQLite (desarrollo) / PostgreSQL (producción)
+## Estructura del Proyecto### Application                    ↓- **Base de datos**: SQLite (desarrollo) / PostgreSQL (producción)
 
-- **Backend**: Flask (Python 3.11)
 
-- **Database Driver**: psycopg2        VM Scale Set (1-3 instancias Ubuntu)- **Containerización**: Docker & Docker Compose
 
-- **Monitoring**: Prometheus + Grafana + Node Exporter
+```- **Backend**: Flask (Python 3.11)
 
-        - Flask API en puerto 5000
+sistema-autoscaling/
 
-### Development
+├── backend/                      # Aplicación Flask- **Database Driver**: psycopg2        VM Scale Set (1-3 instancias Ubuntu)- **Containerización**: Docker & Docker Compose
 
-- **Containerization**: Docker + Docker Compose        - Autoscaling basado en CPU## 🎯 Características
+│   ├── app.py                    # API con endpoints de salud y estrés
 
-- **Version Control**: Git
+│   ├── requirements.txt          # Dependencias Python- **Monitoring**: Prometheus + Grafana + Node Exporter
+
+│   └── Dockerfile                # Imagen Docker
+
+├── infrastructure-azure/         # Código IaC con Pulumi        - Flask API en puerto 5000
+
+│   ├── __main__.py              # Definición de infraestructura
+
+│   ├── Pulumi.yaml              # Configuración del proyecto### Development
+
+│   ├── test_autoscaling.py      # Script de prueba de carga
+
+│   ├── check_deployment.sh      # Verificación del despliegue- **Containerization**: Docker + Docker Compose        - Autoscaling basado en CPU## 🎯 Características
+
+│   └── README.md                # Documentación detallada
+
+└── docker-compose.yml           # Desarrollo local- **Version Control**: Git
+
+```
 
 - **CI/CD**: GitHub        - Standard_B1s (1 vCPU, 1 GB RAM)
 
+## Uso Rápido
 
+
+
+### Desarrollo Local
 
 ## Architecture                    ↓- ✅ Contador de visitas en tiempo real
 
+```bash
 
+# Levantar aplicación
+
+docker-compose up -d
 
 ```        Azure PostgreSQL Flexible Server- ✅ Métricas de CPU y memoria
 
-Internet
+# Acceder
+
+curl http://localhost:5000/healthInternet
+
+```
 
     |        - Base de datos compartida entre instancias- ✅ Endpoint de stress test para simular carga
 
+### Despliegue en Azure
+
     v
 
-[Load Balancer]        - Standard_B1ms (Burstable tier)- ✅ Interfaz web para monitoreo
+```bash
 
-    |
+cd infrastructure-azure[Load Balancer]        - Standard_B1ms (Burstable tier)- ✅ Interfaz web para monitoreo
 
-    +---> [VMSS Instance 1] ---+        - 32 GB storage- ✅ Scripts de prueba de carga externos
+pulumi up --yes
 
-    |                          |
+```    |
 
-    +---> [VMSS Instance 2] ---+---> [PostgreSQL Server]```- ✅ Completamente containerizado
 
-    |                          |
+
+### Pruebas de Autoscaling    +---> [VMSS Instance 1] ---+        - 32 GB storage- ✅ Scripts de prueba de carga externos
+
+
+
+```bash    |                          |
+
+# Obtener IP del Load Balancer
+
+LB_IP=$(pulumi stack output load_balancer_ip)    +---> [VMSS Instance 2] ---+---> [PostgreSQL Server]```- ✅ Completamente containerizado
+
+
+
+# Ejecutar test de carga    |                          |
+
+python3 test_autoscaling.py $LB_IP
 
     +---> [VMSS Instance 3] ---+
+
+# Monitorear en otra terminal
+
+watch -n 10 'az vmss list-instances -g cpe-autoscaling-demo-rg -n cpe-autoscaling-demo-vmss -o table'```
 
 ```
 
 ### Flujo de Autoscaling## 🚀 Inicio Rápido
 
+## Endpoints de la API
+
 ### Key Components
 
+- `GET /health` - Verificación de salud
 
+- `POST /api/visit` - Registrar visita
 
-1. **Load Balancer**: Distributes incoming traffic across VMSS instances
+- `GET /api/visits` - Obtener contador de visitas
+
+- `GET /api/stress?duration=60&intensity=5000000` - Simular carga CPU1. **Load Balancer**: Distributes incoming traffic across VMSS instances
+
+- `GET /api/metrics` - Métricas de CPU y memoria
 
 2. **VMSS**: Automatically scales between 1-3 instances based on CPU metrics- **Scale UP**: Cuando CPU > 70% por 5 minutos → +1 instancia### ✅ Estado: FUNCIONANDO PERFECTAMENTE
 
+## Requisitos
+
 3. **PostgreSQL**: Centralized database shared across all instances
 
-4. **Monitoring**: Real-time metrics via Prometheus and Grafana dashboards- **Scale DOWN**: Cuando CPU < 30% por 5 minutos → -1 instanciaÚltima verificación: 23 octubre 2025 ✓  
+### Desarrollo Local
+
+- Docker y Docker Compose4. **Monitoring**: Real-time metrics via Prometheus and Grafana dashboards- **Scale DOWN**: Cuando CPU < 30% por 5 minutos → -1 instanciaÚltima verificación: 23 octubre 2025 ✓  
+
+- Python 3.11+
 
 
 
-## Features- **Rango**: Mínimo 1 instancia, Máximo 3 instanciasTodos los endpoints probados y operativos ✓  
+### Despliegue en Azure
 
+- Azure CLI configurado## Features- **Rango**: Mínimo 1 instancia, Máximo 3 instanciasTodos los endpoints probados y operativos ✓  
 
+- Pulumi CLI instalado
+
+- Python 3.11+
+
+- Suscripción de Azure activa
 
 - Automatic horizontal scaling based on CPU utilizationError 500 resuelto ✓
 
+## Costos Estimados
+
 - Load balancing across multiple instances
+
+Costos aproximados en Azure (región West US):
 
 - Health monitoring and auto-recovery## Características
 
-- Real-time metrics and visualization
+- VM Scale Set (1-3 × Standard_B1s): $7-21/mes
 
-- Infrastructure versioning and reproducibility### Prerrequisitos
+- PostgreSQL Flexible Server (Standard_B1s): $12/mes- Real-time metrics and visualization
+
+- Load Balancer Standard: $18/mes
+
+- Transferencia de datos: $1-5/mes- Infrastructure versioning and reproducibility### Prerrequisitos
 
 
 
-## Project Structure- **Backend Flask**: API REST con 6 endpoints para gestión de visitas y métricas
+**Total**: ~$40-60/mes
 
 
 
-```- **Frontend React**: Interfaz de usuario con Tailwind CSS- Docker & Docker Compose instalados
+> Azure ofrece $200 en créditos gratuitos por 30 días para cuentas nuevas.## Project Structure- **Backend Flask**: API REST con 6 endpoints para gestión de visitas y métricas
 
-sistema-autoscaling/
 
-├── backend/                  # Flask application- **Base de Datos Compartida**: PostgreSQL accesible desde todas las instancias- Python 3.11+ (para scripts de prueba)
 
-│   ├── app.py               # Main application
+## Documentación Completa
 
-│   ├── requirements.txt     # Python dependencies- **Infraestructura como Código**: Pulumi con Python para Azure- AWS CLI configurado (para despliegue)
 
-│   └── Dockerfile           # Container definition
+
+Para información detallada sobre el despliegue, arquitectura y troubleshooting, consultar:```- **Frontend React**: Interfaz de usuario con Tailwind CSS- Docker & Docker Compose instalados
+
+
+
+- **[infrastructure-azure/README.md](infrastructure-azure/README.md)** - Guía completa de infraestructurasistema-autoscaling/
+
+
+
+## Licencia├── backend/                  # Flask application- **Base de Datos Compartida**: PostgreSQL accesible desde todas las instancias- Python 3.11+ (para scripts de prueba)
+
+
+
+MIT License│   ├── app.py               # Main application
+
+
+
+## Autor│   ├── requirements.txt     # Python dependencies- **Infraestructura como Código**: Pulumi con Python para Azure- AWS CLI configurado (para despliegue)
+
+
+
+Christian Pizarro Espinoza│   └── Dockerfile           # Container definition
+
+- GitHub: [@ChristianPE1](https://github.com/ChristianPE1)
 
 ├── infrastructure-azure/     # IaC implementation- **Containerización**: Docker y Docker Compose para desarrollo local- Pulumi CLI (para IaC)
 

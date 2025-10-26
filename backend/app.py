@@ -186,32 +186,44 @@ def get_visits():
             'instance_id': INSTANCE_ID
         }), 500
 
-@app.route('/api/stress', methods=['POST'])
+@app.route('/api/stress', methods=['GET', 'POST'])
 def stress_test():
     """
-    Endpoint para simular carga de CPU
-    Útil para probar el autoscaling
+    Endpoint para simular carga intensiva de CPU
+    Diseñado para probar autoscaling de VMSS
     """
-    data = request.get_json() or {}
-    duration = min(int(data.get('duration', 5)), 30)  # Máximo 30 segundos
-    intensity = min(int(data.get('intensity', 1000000)), 10000000)  # Límite de intensidad
+    if request.method == 'GET':
+        duration = int(request.args.get('duration', 60))
+        intensity = int(request.args.get('intensity', 5000000))
+    else:
+        data = request.get_json() or {}
+        duration = int(data.get('duration', 60))
+        intensity = int(data.get('intensity', 5000000))
+    
+    # Limitar duración máxima a 120 segundos
+    duration = min(duration, 120)
     
     start_time = time.time()
-    iterations = 0
+    operations = 0
     
-    # Simular carga de CPU con operaciones hash
+    # Generar carga CPU intensiva con múltiples operaciones
     while time.time() - start_time < duration:
+        # Cálculos matemáticos intensivos
         for i in range(intensity):
-            hashlib.sha256(str(i).encode()).hexdigest()
-        iterations += 1
+            # Operaciones hash (muy intensivas en CPU)
+            _ = hashlib.sha512(str(i * 12345).encode()).hexdigest()
+            # Cálculos matemáticos adicionales
+            _ = sum([j**2 for j in range(100)])
+            operations += 1
     
     elapsed = time.time() - start_time
     
     return jsonify({
-        'message': 'Stress test completed',
-        'duration': elapsed,
-        'iterations': iterations,
-        'intensity': intensity
+        'status': 'completed',
+        'duration_seconds': round(elapsed, 2),
+        'operations': operations,
+        'instance_id': INSTANCE_ID,
+        'timestamp': datetime.now().isoformat()
     }), 200
 
 @app.route('/api/metrics', methods=['GET'])
