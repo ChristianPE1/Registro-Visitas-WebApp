@@ -120,58 +120,22 @@ pulumi up --yes
 
 Tiempo estimado: 10-15 minutos
 
-## Pruebas de autoscaling con herramientas externas
+## Pruebas de autoscaling 
 
-### Apache Bench (recomendado)
+### Script Python para carga extrema
 
-```bash
-# Instalar
-sudo pacman -S apache
+Herramienta personalizada para generar carga alta en los endpoints `/api/visit` y `/api/visits`. Las bibliotecas `requests` y `concurrent.futures` se utilizan para enviar múltiples solicitudes concurrentes.
 
-# Obtener IP
-LB_IP=$(pulumi stack output load_balancer_ip)
-
-# Prueba de carga: 100,000 peticiones GET, 200 concurrentes
-ab -n 100000 -c 200 http://$LB_IP/api/visits
-
-# Prueba continua: 5 minutos, 150 concurrentes
-ab -t 300 -c 150 http://$LB_IP/api/visits
+```python
+python3 extreme-load.py <LB_IP>
 ```
 
-### vegeta
-
-```bash
-# Instalar
-sudo pacman -S vegeta
-
-# Crear targets
-cat > targets.txt << EOF
-GET http://$LB_IP/api/visits
-POST http://$LB_IP/api/visit
-EOF
-
-# Ataque: 600 req/seg durante 5 minutos
-cat targets.txt | vegeta attack -duration=300s -rate=600 | vegeta report
-```
-
-### wrk2
-
-```bash
-# Instalar
-yay -S wrk2
-
-# Prueba: 5 minutos, 200 conexiones, 2000 req/seg
-wrk2 -t8 -c200 -d300s -R2000 --latency http://$LB_IP/api/visits
-```
 
 ## Monitoreo
 
 ```bash
 # Ver instancias del VMSS
-watch -n 10 'az vmss list-instances -g cpe-autoscaling-demo-rg -n cpe-autoscaling-demo-vmss -o table'
-
-# Ver CPU promedio
-watch -n 10 "az monitor metrics list --resource \$(az vmss show -g cpe-autoscaling-demo-rg -n cpe-autoscaling-demo-vmss --query id -o tsv) --metric 'Percentage CPU' --interval PT1M --query 'value[0].timeseries[0].data[-3:].{Hora:timeStamp,CPU:average}' -o table"
+watch -n 10 ./monitor_clean.sh
 ```
 
 ## Endpoints de la aplicación

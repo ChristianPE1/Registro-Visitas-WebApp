@@ -2,18 +2,11 @@
 
 Solución full stack que demuestra autoscaling horizontal sobre infraestructura de Microsoft Azure declarada con Pulumi (IaC open source). El backend está construido con Flask, la base de datos es PostgreSQL Flexible Server y la capa de cómputo usa Virtual Machine Scale Sets (VMSS) detrás de un Load Balancer estándar.
 
-## ¿Qué encontrarás en este repositorio?
-
-- Aplicación Flask con endpoints para registrar visitas, exponer métricas y lanzar cargas controladas.
-- Definición completa de infraestructura Azure escrita en Pulumi (Python).
-- Scripts de verificación y pruebas de carga dentro de `infrastructure-azure/`.
-- Documentación paso a paso para desplegar, monitorear y validar el autoscaling.
-
 ## Arquitectura general
 
 1. **Usuarios** → realizan solicitudes HTTP.
 2. **Azure Load Balancer** distribuye el tráfico a las instancias activas del VMSS.
-3. **VM Scale Set (1-3 instancias Ubuntu 22.04)** ejecuta el backend Flask y reporta métricas.
+3. **VM Scale Set (1-5 instancias Ubuntu 22.04)** ejecuta el backend Flask y reporta métricas.
 4. **PostgreSQL Flexible Server** centraliza los datos compartidos por todas las instancias.
 5. **Azure Monitor** analiza la métrica *Percentage CPU* y ajusta la capacidad del VMSS según las reglas configuradas.
 
@@ -56,10 +49,10 @@ En `infrastructure-azure/` encontrarás diferentes opciones:
 
 ```bash
 # Generar carga con wrk (5 minutos, 8 hilos, 150 conexiones)
-wrk -t8 -c150 -d300s --latency http://$LB_IP/
+python3 extreme-load.py $LB_IP$
 
 # Monitorear instancias del VMSS
-watch -n 10 'az vmss list-instances -g cpe-autoscaling-demo-rg -n cpe-autoscaling-demo-vmss -o table'
+watch -n 30 './monitor_clean.sh'
 ```
 
 ## Documentación complementaria
@@ -74,5 +67,5 @@ MIT License
 
 ## Autor
 
-Christian Pizarro Espinoza  
+Christian Pardavé Espinoza  
 GitHub: [@ChristianPE1](https://github.com/ChristianPE1)
