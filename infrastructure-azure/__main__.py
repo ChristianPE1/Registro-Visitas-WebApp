@@ -526,7 +526,7 @@ autoscale_setting = azure.monitor.AutoscaleSetting(
     profiles=[
         azure.monitor.AutoscaleProfileArgs(
             name="Default-Profile",
-            capacity=azure.monitor.ScaleCapacityArgs(minimum="1", maximum="3", default="1"),
+            capacity=azure.monitor.ScaleCapacityArgs(minimum="1", maximum="5", default="1"),
             rules=[
                 azure.monitor.ScaleRuleArgs(
                     metric_trigger=azure.monitor.MetricTriggerArgs(
