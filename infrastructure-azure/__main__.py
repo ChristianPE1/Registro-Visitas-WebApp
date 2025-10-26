@@ -26,12 +26,100 @@ vnet = azure.network.VirtualNetwork(
     virtual_network_name=f"{project_name}-vnet",
 )
 
+# Public IP para NAT Gateway
+nat_gateway_ip = azure.network.PublicIPAddress(
+    f"{project_name}-nat-pip",
+    resource_group_name=resource_group.name,
+    location=location,
+    public_ip_allocation_method="Static",
+    sku=azure.network.PublicIPAddressSkuArgs(name="Standard"),
+    public_ip_address_name=f"{project_name}-nat-pip",
+)
+
+# NAT Gateway para conectividad saliente
+nat_gateway = azure.network.NatGateway(
+    f"{project_name}-nat-gateway",
+    resource_group_name=resource_group.name,
+    location=location,
+    nat_gateway_name=f"{project_name}-nat-gateway",
+    sku=azure.network.NatGatewaySkuArgs(name="Standard"),
+    public_ip_addresses=[azure.network.SubResourceArgs(id=nat_gateway_ip.id)],
+    idle_timeout_in_minutes=10,
+)
+
+# NSG con todas las reglas (incluyendo monitoreo)
+nsg = azure.network.NetworkSecurityGroup(
+    f"{project_name}-nsg",
+    resource_group_name=resource_group.name,
+    location=location,
+    security_rules=[
+        azure.network.SecurityRuleArgs(
+            name="Allow-HTTP",
+            protocol="Tcp",
+            source_port_range="*",
+            destination_port_range="80",
+            source_address_prefix="Internet",
+            destination_address_prefix="*",
+            access="Allow",
+            priority=100,
+            direction="Inbound",
+        ),
+        azure.network.SecurityRuleArgs(
+            name="Allow-Flask",
+            protocol="Tcp",
+            source_port_range="*",
+            destination_port_range="5000",
+            source_address_prefix="*",
+            destination_address_prefix="*",
+            access="Allow",
+            priority=110,
+            direction="Inbound",
+        ),
+        azure.network.SecurityRuleArgs(
+            name="Allow-SSH",
+            protocol="Tcp",
+            source_port_range="*",
+            destination_port_range="22",
+            source_address_prefix="179.7.180.162/32",
+            destination_address_prefix="*",
+            access="Allow",
+            priority=120,
+            direction="Inbound",
+        ),
+        azure.network.SecurityRuleArgs(
+            name="Allow-Grafana",
+            protocol="Tcp",
+            source_port_range="*",
+            destination_port_range="3000",
+            source_address_prefix="179.7.180.162/32",
+            destination_address_prefix="*",
+            access="Allow",
+            priority=130,
+            direction="Inbound",
+        ),
+        azure.network.SecurityRuleArgs(
+            name="Allow-Prometheus",
+            protocol="Tcp",
+            source_port_range="*",
+            destination_port_range="9090",
+            source_address_prefix="179.7.180.162/32",
+            destination_address_prefix="*",
+            access="Allow",
+            priority=140,
+            direction="Inbound",
+        ),
+    ],
+    network_security_group_name=f"{project_name}-nsg",
+)
+
 vm_subnet = azure.network.Subnet(
     f"{project_name}-vm-subnet",
     resource_group_name=resource_group.name,
     virtual_network_name=vnet.name,
     address_prefix="10.0.1.0/24",
     subnet_name=f"{project_name}-vm-subnet",
+    nat_gateway=azure.network.SubResourceArgs(id=nat_gateway.id),
+    network_security_group=azure.network.NetworkSecurityGroupArgs(id=nsg.id),
 )
 
 db_subnet = azure.network.Subnet(
@@ -73,8 +161,41 @@ load_balancer = azure.network.LoadBalancer(
             protocol="Http",
             port=5000,
             request_path="/health",
-            interval_in_seconds=30,
+            interval_in_seconds=15,
             number_of_probes=2,
+        ),
+        azure.network.ProbeArgs(
+            name=f"{project_name}-grafana-probe",
+            protocol="Http",
+            port=3000,
+            request_path="/api/health",
+            interval_in_seconds=15,
+            number_of_probes=2,
+        ),
+        azure.network.ProbeArgs(
+            name=f"{project_name}-prometheus-probe",
+            protocol="Http",
+            port=9090,
+            request_path="/-/healthy",
+            interval_in_seconds=15,
+            number_of_probes=2,
+        ),
+    ],
+    inbound_nat_pools=[
+        azure.network.InboundNatPoolArgs(
+            name=f"{project_name}-ssh-nat-pool",
+            frontend_ip_configuration=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/frontendIPConfigurations/LoadBalancerFrontend"
+                )
+            ),
+            protocol="Tcp",
+            frontend_port_range_start=50000,
+            frontend_port_range_end=50099,
+            backend_port=22,
         )
     ],
     load_balancing_rules=[
@@ -109,54 +230,76 @@ load_balancer = azure.network.LoadBalancer(
             backend_port=5000,
             enable_floating_ip=False,
             idle_timeout_in_minutes=4,
-        )
+        ),
+        azure.network.LoadBalancingRuleArgs(
+            name=f"{project_name}-grafana-rule",
+            frontend_ip_configuration=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/frontendIPConfigurations/LoadBalancerFrontend"
+                )
+            ),
+            backend_address_pool=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/backendAddressPools/", f"{project_name}-backend-pool"
+                )
+            ),
+            probe=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/probes/", f"{project_name}-grafana-probe"
+                )
+            ),
+            protocol="Tcp",
+            frontend_port=3000,
+            backend_port=3000,
+            enable_floating_ip=False,
+            idle_timeout_in_minutes=4,
+        ),
+        azure.network.LoadBalancingRuleArgs(
+            name=f"{project_name}-prometheus-rule",
+            frontend_ip_configuration=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/frontendIPConfigurations/LoadBalancerFrontend"
+                )
+            ),
+            backend_address_pool=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/backendAddressPools/", f"{project_name}-backend-pool"
+                )
+            ),
+            probe=azure.network.SubResourceArgs(
+                id=Output.concat(
+                    "/subscriptions/", subscription_id,
+                    "/resourceGroups/", resource_group.name,
+                    "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                    "/probes/", f"{project_name}-prometheus-probe"
+                )
+            ),
+            protocol="Tcp",
+            frontend_port=9090,
+            backend_port=9090,
+            enable_floating_ip=False,
+            idle_timeout_in_minutes=4,
+        ),
     ],
     load_balancer_name=f"{project_name}-lb",
 )
 
-nsg = azure.network.NetworkSecurityGroup(
-    f"{project_name}-nsg",
-    resource_group_name=resource_group.name,
-    location=location,
-    security_rules=[
-        azure.network.SecurityRuleArgs(
-            name="Allow-HTTP",
-            protocol="Tcp",
-            source_port_range="*",
-            destination_port_range="80",
-            source_address_prefix="Internet",
-            destination_address_prefix="*",
-            access="Allow",
-            priority=100,
-            direction="Inbound",
-        ),
-        azure.network.SecurityRuleArgs(
-            name="Allow-Flask",
-            protocol="Tcp",
-            source_port_range="*",
-            destination_port_range="5000",
-            source_address_prefix="AzureLoadBalancer",
-            destination_address_prefix="*",
-            access="Allow",
-            priority=110,
-            direction="Inbound",
-        ),
-        azure.network.SecurityRuleArgs(
-            name="Allow-SSH",
-            protocol="Tcp",
-            source_port_range="*",
-            destination_port_range="22",
-            source_address_prefix="179.7.180.162/32",
-            destination_address_prefix="*",
-            access="Allow",
-            priority=120,
-            direction="Inbound",
-        ),
-    ],
-    network_security_group_name=f"{project_name}-nsg",
-)
-
-# PostgreSQL Server (B1ms - Burstable, 1 vCore, 2 GiB RAM, 32 GiB storage)
+# PostgreSQL Flexible Server (B1ms - Burstable, 1 vCore, 2 GiB RAM, 32 GiB storage)
 postgres_server = azure.dbforpostgresql.Server(
     f"{project_name}-postgres",
     resource_group_name=resource_group.name,
@@ -164,17 +307,22 @@ postgres_server = azure.dbforpostgresql.Server(
     server_name=f"{project_name}-postgres",
     administrator_login="autoscaling_user",
     administrator_login_password=db_password,
-    version="11",  # PostgreSQL 11
+    version=azure.dbforpostgresql.ServerVersion.SERVER_VERSION_13,
     sku=azure.dbforpostgresql.SkuArgs(
-        name="B_Gen5_1",  # Burstable, Gen5, 1 vCore
-        tier="Basic",
-        capacity=1,
-        family="Gen5"
+        name="Standard_B1s",
+        tier=azure.dbforpostgresql.SkuTier.BURSTABLE
     ),
-    storage_mb=32768,  # 32 GiB
-    backup_retention_days=7,
-    geo_redundant_backup="Disabled",
-    ssl_enforcement="Enabled",
+    storage=azure.dbforpostgresql.StorageArgs(
+        storage_size_gb=32
+    ),
+    backup=azure.dbforpostgresql.BackupArgs(
+        backup_retention_days=7,
+        geo_redundant_backup=azure.dbforpostgresql.GeoRedundantBackupEnum.DISABLED
+    ),
+    high_availability=azure.dbforpostgresql.HighAvailabilityArgs(
+        mode=azure.dbforpostgresql.HighAvailabilityMode.DISABLED
+    ),
+    create_mode=azure.dbforpostgresql.CreateMode.CREATE,
 )
 
 # Firewall rule para permitir servicios de Azure
@@ -187,108 +335,110 @@ postgres_firewall = azure.dbforpostgresql.FirewallRule(
     end_ip_address="0.0.0.0",
 )
 
-postgres_database = azure.dbforpostgresql.Database(
-    f"{project_name}-db",
-    resource_group_name=resource_group.name,
-    server_name=postgres_server.name,
-    database_name="autoscaling",
-    charset="UTF8",
-    collation="English_United States.1252",
-)
-
-# MySQL Server (versión clásica - más simple y económica)
-mysql_server = azure.dbformysql.FlexibleServer(
-    f"{project_name}-mysql",
-    resource_group_name=resource_group.name,
-    location=location,
-    administrator_login="autoscaling_user",
-    administrator_login_password=db_password,
-    version="8.0.21",
-    sku=azure.dbformysql.SkuArgs(
-        name="Standard_B1ms",
-        tier="Burstable",
-        family="Gen5",
-        capacity=1,
-    ),
-    storage=azure.dbformysql.StorageArgs(
-        storage_size_gb=20,
-        auto_grow="Enabled",
-        iops=100,
-    ),
-    network=azure.dbformysql.NetworkArgs(
-        delegated_subnet_resource_id=db_subnet.id,
-        public_network_access="Enabled",
-    ),
-    backup=azure.dbformysql.BackupArgs(
-        backup_retention_days=7,
-        geo_redundant_backup="Disabled",
-    ),
-)
-
-
-# Firewall rule para permitir acceso desde Azure VMs
-mysql_firewall = azure.dbformysql.FirewallRule(
-    f"{project_name}-mysql-fw",
-    resource_group_name=resource_group.name,
-    server_name=mysql_server.name,
-    firewall_rule_name="AllowAzureServices",
-    start_ip_address="0.0.0.0",
-    end_ip_address="0.0.0.0",  # Permite servicios de Azure
-)
-
-mysql_database = azure.dbformysql.Database(
-    f"{project_name}-db",
-    resource_group_name=resource_group.name,
-    server_name=mysql_server.name,
-    database_name="autoscaling",
-    charset="utf8mb4",
-    collation="utf8mb4_general_ci",
-)
-
 
 def create_user_data(db_info):
     db_host = db_info[0]
     db_pass = db_info[1]
     
     user_data_script = f"""#!/bin/bash
-set -e
-exec > >(tee /var/log/user-data.log)
+set -ex
+exec > >(tee -a /var/log/user-data.log)
 exec 2>&1
 
+echo "=========================================="
 echo "Starting user-data script at $(date)"
+echo "=========================================="
 
 # Actualizar sistema
+echo "[$(date)] Updating system packages..."
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get upgrade -y
+apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
 
 # Instalar dependencias
-apt-get install -y git python3 python3-pip python3-venv
+echo "[$(date)] Installing dependencies..."
+apt-get install -y git python3 python3-pip python3-venv stress-ng postgresql-client
 
 # Clonar repositorio
+echo "[$(date)] Cloning repository..."
 cd /home/{admin_username}
+rm -rf app || true
 git clone https://github.com/ChristianPE1/Registro-Visitas-WebApp.git app
-cd app/backend
+chown -R {admin_username}:{admin_username} app
 
-# Crear entorno virtual e instalar dependencias
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+# Configurar Backend
+echo "[$(date)] Setting up Flask backend..."
+cd /home/{admin_username}/app/backend
+sudo -u {admin_username} python3 -m venv venv
+sudo -u {admin_username} bash -c "source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"
 
 # Configurar variables de entorno para PostgreSQL
 cat > .env << 'EOFENV'
 DB_HOST={db_host}
 DB_PORT=5432
-DB_NAME=autoscaling
-DB_USER=autoscaling_user@{db_host}
+DB_NAME=postgres
+DB_USER=autoscaling_user
 DB_PASSWORD={db_pass}
 FLASK_ENV=production
 EOFENV
 
-# Ejecutar aplicación
-nohup python3 app.py > /var/log/flask-app.log 2>&1 &
+# Crear base de datos si no existe
+echo "[$(date)] Creating database if not exists..."
+PGPASSWORD='{db_pass}' psql -h {db_host} -U autoscaling_user -d postgres -c "SELECT 1" 2>&1 || echo "Database connection test completed"
 
-echo "User-data script completed successfully at $(date)"
+# Crear systemd service para Flask
+echo "[$(date)] Creating Flask systemd service..."
+cat > /tmp/flask-app.service << 'EOFSVC'
+[Unit]
+Description=Flask Autoscaling Demo App
+After=network.target
+
+[Service]
+Type=simple
+User={admin_username}
+WorkingDirectory=/home/{admin_username}/app/backend
+Environment="PATH=/home/{admin_username}/app/backend/venv/bin"
+EnvironmentFile=/home/{admin_username}/app/backend/.env
+ExecStart=/home/{admin_username}/app/backend/venv/bin/python3 /home/{admin_username}/app/backend/app.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/flask-app.log
+StandardError=append:/var/log/flask-app-error.log
+
+[Install]
+WantedBy=multi-user.target
+EOFSVC
+
+sudo mv /tmp/flask-app.service /etc/systemd/system/flask-app.service
+
+# Habilitar e iniciar Flask service
+echo "[$(date)] Starting Flask service..."
+sudo systemctl daemon-reload
+sudo systemctl enable flask-app.service
+sudo systemctl start flask-app.service
+
+# Esperar a que Flask esté listo
+echo "[$(date)] Waiting for Flask to be ready..."
+for i in {{1..30}}; do
+    if curl -f http://localhost:5000/health > /dev/null 2>&1; then
+        echo "[$(date)] Flask is UP!"
+        break
+    fi
+    echo "[$(date)] Attempt $i: Flask not ready yet..."
+    sleep 2
+done
+
+# Verificar estado final
+echo "[$(date)] Flask service status:"
+sudo systemctl status flask-app.service --no-pager || true
+
+echo "[$(date)] Flask process:"
+ps aux | grep -E 'python.*app.py' | grep -v grep || echo "No Flask process found!"
+
+echo "[$(date)] Testing local endpoint:"
+curl -v http://localhost:5000/health || echo "Health check failed"
+
+echo "[$(date)] User-data script completed successfully at $(date)"
 """
     return user_data_script
 
@@ -301,7 +451,7 @@ vmss = azure.compute.VirtualMachineScaleSet(
     location=location,
     vm_scale_set_name=f"{project_name}-vmss",
     sku=azure.compute.SkuArgs(name="Standard_B1s", tier="Standard", capacity=1),
-    upgrade_policy=azure.compute.UpgradePolicyArgs(mode="Automatic"),
+    upgrade_policy=azure.compute.UpgradePolicyArgs(mode="Manual"),
     virtual_machine_profile=azure.compute.VirtualMachineScaleSetVMProfileArgs(
         os_profile=azure.compute.VirtualMachineScaleSetOSProfileArgs(
             computer_name_prefix=project_name[:10],
@@ -323,6 +473,9 @@ vmss = azure.compute.VirtualMachineScaleSet(
                 managed_disk=azure.compute.VirtualMachineScaleSetManagedDiskParametersArgs(storage_account_type="Standard_LRS"),
             ),
         ),
+        diagnostics_profile=azure.compute.DiagnosticsProfileArgs(
+            boot_diagnostics=azure.compute.BootDiagnosticsArgs(enabled=True)
+        ),
         network_profile=azure.compute.VirtualMachineScaleSetNetworkProfileArgs(
             network_interface_configurations=[
                 azure.compute.VirtualMachineScaleSetNetworkConfigurationArgs(
@@ -342,12 +495,24 @@ vmss = azure.compute.VirtualMachineScaleSet(
                                     )
                                 )
                             ],
+                            load_balancer_inbound_nat_pools=[
+                                azure.compute.SubResourceArgs(
+                                    id=Output.concat(
+                                        "/subscriptions/", subscription_id,
+                                        "/resourceGroups/", resource_group.name,
+                                        "/providers/Microsoft.Network/loadBalancers/", f"{project_name}-lb",
+                                        "/inboundNatPools/", f"{project_name}-ssh-nat-pool"
+                                    )
+                                )
+                            ],
                         )
                     ],
-                    network_security_group=azure.compute.SubResourceArgs(id=nsg.id),
                 )
             ],
         ),
+    ),
+    opts=pulumi.ResourceOptions(
+        depends_on=[load_balancer, vm_subnet, nat_gateway, postgres_firewall]
     ),
 )
 
@@ -406,7 +571,11 @@ autoscale_setting = azure.monitor.AutoscaleSetting(
 
 export("resource_group_name", resource_group.name)
 export("load_balancer_ip", public_ip.ip_address)
-export("load_balancer_url", Output.concat("http://", public_ip.ip_address))
+export("load_balancer_url", public_ip.ip_address.apply(lambda ip: f"http://{ip}" if ip else "Pending..."))
 export("postgres_server", postgres_server.fully_qualified_domain_name)
 export("vmss_name", vmss.name)
 export("location", location)
+export("ssh_command", public_ip.ip_address.apply(lambda ip: f"ssh -p 5000X {admin_username}@{ip}  (X=instance ID, ej: 50001 para instancia 1)" if ip else "Pending..."))
+export("health_endpoint", public_ip.ip_address.apply(lambda ip: f"http://{ip}/health" if ip else "Pending..."))
+export("grafana_url", public_ip.ip_address.apply(lambda ip: f"http://{ip}:3000 (admin/admin)" if ip else "Pending..."))
+export("prometheus_url", public_ip.ip_address.apply(lambda ip: f"http://{ip}:9090" if ip else "Pending..."))

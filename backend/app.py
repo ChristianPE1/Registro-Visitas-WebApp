@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from prometheus_flask_exporter import PrometheusMetrics
 import os
 import time
 import socket
@@ -8,6 +9,10 @@ from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
+
+# Inicializar Prometheus metrics
+metrics = PrometheusMetrics(app)
+metrics.info('app_info', 'Application info', version='1.0.0')
 
 # Detectar si estamos en producción (Azure) o desarrollo (local)
 IS_PRODUCTION = os.getenv('FLASK_ENV') == 'production'
