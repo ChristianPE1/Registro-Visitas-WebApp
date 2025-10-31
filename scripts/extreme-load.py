@@ -18,9 +18,9 @@ if not LB_IP:
     sys.exit(1)
 
 BASE_URL = f"http://{LB_IP}"
-CONCURRENT_REQUESTS = 1000  # 1000 peticiones simultáneas
-REQUESTS_PER_BATCH = 10000  # 10k peticiones por lote
-CONTINUOUS = True  # Carga continua sin parar
+CONCURRENT_REQUESTS = 200  
+REQUESTS_PER_BATCH = 5000  # 5k peticiones por lote
+CONTINUOUS = True 
 
 # Estadísticas globales
 stats = {
@@ -52,16 +52,15 @@ async def make_request(session, semaphore, method='GET'):
             if method == 'GET':
                 async with session.get(
                     f"{BASE_URL}/api/visits",
-                    timeout=aiohttp.ClientTimeout(total=20)
+                    timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
                     await response.read()
                     stats['get'] += 1
             else:  # POST
-                visitor_data = generate_random_visitor()
+                # POST a /api/visit (singular) - registra visita
                 async with session.post(
-                    f"{BASE_URL}/api/visits",
-                    json=visitor_data,
-                    timeout=aiohttp.ClientTimeout(total=20)
+                    f"{BASE_URL}/api/visit",
+                    timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
                     await response.read()
                     stats['post'] += 1
@@ -93,8 +92,8 @@ async def run_batch(session, semaphore, batch_size):
     """Ejecuta un lote de peticiones"""
     tasks = []
     for _ in range(batch_size):
-        # 50% GET, 50% POST
-        method = 'GET' if random.random() < 0.5 else 'POST'
+        # 30% GET, 70% POST (POST es más pesado y genera más CPU)
+        method = 'GET' if random.random() < 0.3 else 'POST'
         task = make_request(session, semaphore, method)
         tasks.append(task)
     
