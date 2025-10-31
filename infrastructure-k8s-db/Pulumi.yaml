@@ -1,0 +1,11 @@
+name: k8s-db
+runtime: python
+description: Pila de base de datos PostgreSQL - Micro-Stack independiente
+
+config:
+  location:
+    description: Azure region para desplegar recursos
+    default: eastus
+  db_admin_password:
+    description: Contraseña del administrador de PostgreSQL
+    secret: true

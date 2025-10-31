@@ -1,0 +1,5 @@
+config:
+  k8s-deploy:backend_image: YOUR_REGISTRY/autoscaling-backend:latest
+  k8s-deploy:frontend_image: YOUR_REGISTRY/autoscaling-frontend:latest
+  k8s-deploy:db_admin_password:
+    secure: # Configurar con: pulumi config set --secret db_admin_password YOUR_PASSWORD

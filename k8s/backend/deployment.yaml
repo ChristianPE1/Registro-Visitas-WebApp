@@ -1,0 +1,221 @@
+# Backend - Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backend
+  labels:
+    name: backend
+    environment: production
+---
+# Backend - Secret para conexión a base de datos
+# Los valores se llenarán desde Pulumi
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: backend
+type: Opaque
+stringData:
+  DB_HOST: "" # Se llenará con pulumi
+  DB_PORT: "5432"
+  DB_NAME: "autoscaling_db"
+  DB_USER: "postgres_admin"
+  DB_PASSWORD: "" # Se llenará con pulumi (secreto)
+---
+# Backend - ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: backend
+data:
+  FLASK_ENV: "production"
+  PORT: "5000"
+---
+# Backend - Deployment
+# Principio: "Ganado no Mascotas" (Cap 2) - Pods desechables y reemplazables
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: backend
+  labels:
+    app: backend
+    tier: application
+    version: v1
+spec:
+  replicas: 2  # Mínimo 2 réplicas para HA
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Cero downtime
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        tier: application
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Node Affinity - Solo en nodos del pool backend
+      # Principio: "Minimizar variación" (Cap 2)
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: workload
+                operator: In
+                values:
+                - backend
+        # Anti-affinity para distribuir pods en diferentes nodos
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: backend
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: backend
+        image: DOCKER_IMAGE_PLACEHOLDER  # Se reemplazará con imagen real
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+          name: http
+          protocol: TCP
+        env:
+        - name: FLASK_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: FLASK_ENV
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: PORT
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_PASSWORD
+        # Health checks - Implementa "Asumir sistemas no confiables" (Cap 2)
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        # Resource limits para HPA
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+# Backend - Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: backend
+  labels:
+    app: backend
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "false"
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 5000
+    protocol: TCP
+  sessionAffinity: None
+---
+# Backend - HorizontalPodAutoscaler
+# Implementa autoscaling automático basado en métricas
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70  # Escala cuando CPU > 70%
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80  # Escala cuando RAM > 80%
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Espera 5 min antes de reducir
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0  # Escala inmediatamente hacia arriba
+      policies:
+      - type: Percent
+        value: 100  # Duplica pods si es necesario
+        periodSeconds: 30
+      - type: Pods
+        value: 2  # O agrega 2 pods a la vez
+        periodSeconds: 30
+      selectPolicy: Max  # Usa la política más agresiva

@@ -1,0 +1,11 @@
+name: k8s-base
+runtime: python
+description: Pila de infraestructura base - AKS Cluster con node pools
+
+config:
+  location:
+    description: Azure region para desplegar recursos
+    default: eastus
+  ssh_public_key:
+    description: SSH public key para acceder a nodos (si es necesario)
+    secret: false

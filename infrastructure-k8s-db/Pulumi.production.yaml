@@ -1,0 +1,4 @@
+config:
+  k8s-db:location: eastus
+  k8s-db:db_admin_password:
+    secure: # Configurar con: pulumi config set --secret db_admin_password YOUR_PASSWORD

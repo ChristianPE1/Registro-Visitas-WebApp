@@ -1,0 +1,3 @@
+config:
+  k8s-base:location: eastus
+  k8s-base:ssh_public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... # Placeholder - reemplazar con tu clave pública

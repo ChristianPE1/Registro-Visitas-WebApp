@@ -1,0 +1,14 @@
+name: k8s-deploy
+runtime: python
+description: Pila de despliegue de aplicaciones en Kubernetes - PaaS Layer
+
+config:
+  backend_image:
+    description: Imagen Docker del backend
+    default: YOUR_REGISTRY/autoscaling-backend:latest
+  frontend_image:
+    description: Imagen Docker del frontend
+    default: YOUR_REGISTRY/autoscaling-frontend:latest
+  db_admin_password:
+    description: Contraseña del administrador de PostgreSQL (mismo que en k8s-db)
+    secret: true
