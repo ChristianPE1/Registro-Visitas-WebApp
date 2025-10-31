@@ -94,25 +94,35 @@ pulumi up
 ```
 
 ### Paso 5: Desplegar Monitoreo (2 min)
+
+**IMPORTANTE**: El monitoreo también debe ser IaC. Por ahora, si quieres verlo funcionando:
+
 ```bash
+# Opción A: Aplicar manualmente (temporal, para demo)
 kubectl apply -f k8s/monitoring/prometheus-grafana.yaml
+
+# Opción B: Crear una Pila 4 de Pulumi (recomendado para producción)
+# TODO: Migrar monitoring a Pulumi también
 ```
 
-### Verificar Despliegue
+### Verificar Despliegue (Solo Observación)
+
+**IMPORTANTE**: `kubectl` solo se usa para **VER** lo que Pulumi creó, NO para crear recursos.
+
 ```bash
-# Ver todos los pods
+# Ver todos los pods creados POR PULUMI
 kubectl get pods --all-namespaces
 
-# Ver servicios e IPs públicas
+# Ver servicios e IPs públicas creadas POR PULUMI
 kubectl get svc --all-namespaces
 
-# Ver HPA
+# Ver HPA creados POR PULUMI
 kubectl get hpa -n backend
 kubectl get hpa -n frontend
 
-# Obtener URL del frontend
-kubectl get svc -n frontend frontend-service
-# O: pulumi stack output frontend_url -C infrastructure-k8s-deploy
+# Obtener URL del frontend (desde Pulumi, mejor opción)
+cd infrastructure-k8s-deploy
+pulumi stack output frontend_url
 ```
 
 ## 🎓 Conceptos IaC Aplicados

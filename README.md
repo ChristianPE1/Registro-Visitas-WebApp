@@ -243,23 +243,25 @@ kubectl apply -f ../k8s/monitoring/prometheus-grafana.yaml
 
 ## 🔍 Verificación
 
+**IMPORTANTE**: `kubectl` solo se usa para **observar** lo que Pulumi creó. Todo se ejecuta desde tu laptop local.
+
 ```bash
-# Ver todos los pods
-kubectl get pods --all-namespaces
+# 1. Obtener credenciales del cluster (una sola vez)
+az aks get-credentials --resource-group cpe-k8s-autoscaling-rg \
+  --name cpe-k8s-autoscaling-aks --overwrite-existing
 
-# Ver servicios (obtener IPs públicas)
-kubectl get svc --all-namespaces
+# 2. Ver recursos creados POR PULUMI (solo observación)
+kubectl get pods --all-namespaces          # Ver pods
+kubectl get svc --all-namespaces           # Ver servicios
+kubectl get hpa -n backend                 # Ver autoscalers
+kubectl get nodes -o wide                  # Ver nodos
 
-# Ver estado de HPA
-kubectl get hpa -n backend
-kubectl get hpa -n frontend
-
-# Ver nodos del cluster
-kubectl get nodes -o wide
-
-# Obtener URL del frontend
-pulumi stack output frontend_url -C infrastructure-k8s-deploy
+# 3. Obtener URL del frontend (desde Pulumi, preferido)
+cd infrastructure-k8s-deploy
+pulumi stack output frontend_url
 ```
+
+**kubectl NO crea infraestructura**, solo permite ver el estado del cluster remoto.
 
 ## 🌐 Acceso a la Aplicación
 
