@@ -1,15 +1,15 @@
 # Backend Kubernetes Manifests
 
-## 📋 Descripción
+## Descripción
 Manifiestos de Kubernetes para el backend Flask con autoscaling.
 
-## 🎯 Principios IaC Aplicados
+## Principios IaC Aplicados
 - **Ganado no Mascotas** (Cap 2): Pods desechables y reemplazables
 - **Asumir sistemas no confiables** (Cap 2): Health checks y auto-healing
 - **Minimizar variación** (Cap 2): Node affinity para pool específico
 - **Piezas pequeñas débilmente acopladas** (Cap 1): Backend independiente
 
-## 📦 Recursos Incluidos
+## Recursos Incluidos
 - **Namespace**: backend
 - **Secret**: db-credentials (conexión a PostgreSQL)
 - **ConfigMap**: backend-config (variables de entorno)
@@ -17,7 +17,7 @@ Manifiestos de Kubernetes para el backend Flask con autoscaling.
 - **Service**: ClusterIP para comunicación interna
 - **HPA**: Autoscaling basado en CPU (70%) y Memoria (80%)
 
-## 🚀 Características
+## Características
 
 ### Node Affinity
 Los pods solo se despliegan en nodos con label `workload=backend`.
@@ -37,17 +37,7 @@ Los pods se distribuyen en diferentes nodos para alta disponibilidad.
 - **Scale Up**: Inmediato (agresivo)
 - **Scale Down**: Espera 5 min (conservador)
 
-## 🔧 Variables a Configurar
-
-Antes de desplegar, reemplazar:
-- `DOCKER_IMAGE_PLACEHOLDER` con tu imagen Docker
-- `DB_HOST` y `DB_PASSWORD` en el Secret (se hace desde Pulumi)
-
-## 📊 Recursos por Pod
-- **Requests**: 100m CPU, 128Mi RAM
-- **Limits**: 500m CPU, 512Mi RAM
-
-## 🔗 Endpoints
+## Endpoints
 - `/health` - Health check
 - `/api/visit` - Registrar visita
 - `/api/visits` - Obtener visitas

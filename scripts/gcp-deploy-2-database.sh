@@ -1,19 +1,18 @@
 #!/bin/bash
-set -e  # Salir si hay error
+set -e
 
 echo "=================================================="
-echo "PASO 1: Desplegar Cluster AKS"
+echo "PASO 2: Desplegar Cloud SQL PostgreSQL"
 echo "=================================================="
 
-# Ir al directorio correcto
-cd "$(dirname "$0")/../infrastructure-k8s-base"
+cd "$(dirname "$0")/../infrastructure-gcp-db"
 
-# Verificar que estamos en el lugar correcto
 if [ ! -f "__main__.py" ]; then
     echo "Error: No se encontró __main__.py"
     exit 1
 fi
 
+echo "Directorios: $(pwd)"
 
 # Crear y activar entorno virtual
 if [ ! -d "venv" ]; then
@@ -37,28 +36,30 @@ if ! pulumi stack select production 2>/dev/null; then
     pulumi stack init production
 fi
 
-# Verificar si existe SSH key
-if [ ! -f "$HOME/.ssh/aks_key.pub" ]; then
-    echo "Generando SSH key..."
-    ssh-keygen -t rsa -b 4096 -f "$HOME/.ssh/aks_key" -N ""
+# Configurar proyecto de GCP
+echo "Configurando proyecto GCP..."
+pulumi config set gcp:project cpe-autoscaling-k8s
+pulumi config set gcp:region us-central1
+
+# Configurar password de base de datos
+if ! pulumi config get db_admin_password --show-secrets > /dev/null 2>&1; then
+    echo "Configurando password de base de datos..."
+    DB_PASSWORD=$(openssl rand -base64 32)
+    pulumi config set --secret db_admin_password "$DB_PASSWORD"
+else
+    echo "Password de base de datos ya configurada"
 fi
 
-# Configurar SSH key
-echo "Configurando SSH key..."
-pulumi config set ssh_public_key "$(cat $HOME/.ssh/aks_key.pub)"
-
-# Verificar configuración
-echo ""
 echo "Configuración actual:"
 pulumi config
-echo ""
+
+
 # Desplegar
 pulumi up --yes
 
-echo " Outputs:"
+echo "Outputs:"
 pulumi stack output
 
-echo ""
 echo "=================================================="
-echo "✅ PASO 1 COMPLETADO"
+echo "✅ PASO 2 COMPLETADO"
 echo "=================================================="

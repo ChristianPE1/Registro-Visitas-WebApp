@@ -1,0 +1,5 @@
+config:
+  gcp:project: cpe-autoscaling-k8s
+  gcp:region: us-central1
+  gcp-db:db_admin_password:
+    secure: AAABALJh2ZxNyQ9+Npo2c3kJr40t/ItZZlfNtzCfSFdA+zp6vDU7UxVkMz4yB6zis94PZW1oiC45lZ5tR5vAI909TraK+9OflXf4Ig==

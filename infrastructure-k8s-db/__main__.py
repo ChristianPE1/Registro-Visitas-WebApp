@@ -12,7 +12,7 @@ from pulumi import Config, export, Output, StackReference
 
 config = Config()
 project_name = "cpe-k8s-autoscaling"
-location = config.get("location") or "eastus"
+location = config.get("location") or "westus"  # westus - disponibilidad de PostgreSQL Flexible Server
 db_admin_user = "postgres_admin"
 db_admin_password = config.require_secret("db_admin_password")
 db_name = "autoscaling_db"

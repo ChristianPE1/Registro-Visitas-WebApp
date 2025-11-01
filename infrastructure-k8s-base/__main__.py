@@ -12,7 +12,7 @@ from pulumi import Config, export, Output
 
 config = Config()
 project_name = "cpe-k8s-autoscaling"
-location = config.get("location") or "eastus"  # AKS disponible en East US
+location = config.get("location") or "westus"  # westus - misma región que PostgreSQL
 admin_username = "azureuser"
 ssh_public_key = config.require("ssh_public_key")
 subscription_id = "1eb83675-114b-4f93-8921-f055b5bd6ea8"
@@ -21,7 +21,6 @@ subscription_id = "1eb83675-114b-4f93-8921-f055b5bd6ea8"
 resource_group = azure.resources.ResourceGroup(
     f"{project_name}-rg",
     location=location,
-    resource_group_name=f"{project_name}-rg",
     tags={
         "project": "autoscaling-demo",
         "environment": "production",
@@ -35,7 +34,6 @@ vnet = azure.network.VirtualNetwork(
     f"{project_name}-vnet",
     resource_group_name=resource_group.name,
     location=location,
-    virtual_network_name=f"{project_name}-vnet",
     address_space=azure.network.AddressSpaceArgs(
         address_prefixes=["10.0.0.0/16"]
     ),
@@ -49,8 +47,8 @@ aks_subnet = azure.network.Subnet(
     f"{project_name}-aks-subnet",
     resource_group_name=resource_group.name,
     virtual_network_name=vnet.name,
-    subnet_name=f"{project_name}-aks-subnet",
     address_prefix="10.0.1.0/24",
+    opts=pulumi.ResourceOptions(depends_on=[vnet])  # Dependencia explícita
 )
 
 # Network Security Group - Seguridad de red
@@ -58,7 +56,6 @@ nsg = azure.network.NetworkSecurityGroup(
     f"{project_name}-nsg",
     resource_group_name=resource_group.name,
     location=location,
-    network_security_group_name=f"{project_name}-nsg",
     security_rules=[
         # Permitir tráfico HTTP desde internet
         azure.network.SecurityRuleArgs(
@@ -117,10 +114,10 @@ nsg = azure.network.NetworkSecurityGroup(
 # AKS Cluster - Kubernetes managed service
 # Principio: "Asumir sistemas no confiables" + "Cosas desechables"
 aks_cluster = azure.containerservice.ManagedCluster(
-    f"{project_name}-aks",
+    "aks-cluster",  # Nombre lógico en Pulumi
     resource_group_name=resource_group.name,
     location=location,
-    resource_name=f"{project_name}-aks",
+    resource_name_=f"{project_name}-aks",  # Nombre físico en Azure (con guion bajo)
     
     # DNS prefix para el cluster
     dns_prefix=f"{project_name}",
@@ -161,8 +158,8 @@ aks_cluster = azure.containerservice.ManagedCluster(
     # Habilitar RBAC y Azure AD
     enable_rbac=True,
     
-    # Kubernetes version
-    kubernetes_version="1.28.3",
+    # Kubernetes version - 1.31.11 estable en westus
+    kubernetes_version="1.31.11",
     
     # Autoescalado del cluster
     auto_scaler_profile=azure.containerservice.ManagedClusterPropertiesAutoScalerProfileArgs(
@@ -180,10 +177,10 @@ aks_cluster = azure.containerservice.ManagedCluster(
 # Frontend Node Pool - Pool separado para frontend
 # Principio: "Piezas pequeñas y débilmente acopladas" (Cap 1)
 frontend_node_pool = azure.containerservice.AgentPool(
-    f"{project_name}-frontend-pool",
+    "frontend-pool",  # Nombre lógico en Pulumi
     resource_group_name=resource_group.name,
-    resource_name=f"{project_name}-aks",
-    agent_pool_name="frontend",
+    resource_name_=aks_cluster.name,  # Nombre del cluster AKS (con guion bajo)
+    agent_pool_name="frontend",  # Nombre del pool
     count=1,  # Mínimo 1 nodo
     vm_size="Standard_B2s",
     os_type="Linux",
@@ -209,10 +206,10 @@ frontend_node_pool = azure.containerservice.AgentPool(
 # Backend Node Pool - Pool separado para backend
 # Principio: "Piezas pequeñas y débilmente acopladas"
 backend_node_pool = azure.containerservice.AgentPool(
-    f"{project_name}-backend-pool",
+    "backend-pool",  # Nombre lógico en Pulumi
     resource_group_name=resource_group.name,
-    resource_name=f"{project_name}-aks",
-    agent_pool_name="backend",
+    resource_name_=aks_cluster.name,  # Nombre del cluster AKS (con guion bajo)
+    agent_pool_name="backend",  # Nombre del pool
     count=1,  # Mínimo 1 nodo
     vm_size="Standard_B2s",
     os_type="Linux",

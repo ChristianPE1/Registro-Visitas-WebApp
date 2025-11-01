@@ -1,0 +1,11 @@
+name: gcp-db
+runtime: python
+description: Cloud SQL for PostgreSQL with independent lifecycle
+
+config:
+  region:
+    description: GCP region for Cloud SQL
+    default: us-central1
+  db_admin_password:
+    description: Password for PostgreSQL admin user
+    secret: true

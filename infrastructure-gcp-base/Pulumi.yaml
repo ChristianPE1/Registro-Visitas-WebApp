@@ -1,0 +1,11 @@
+name: gcp-base
+runtime: python
+description: GKE Cluster base infrastructure with node pools and autoscaling
+
+config:
+  region:
+    description: GCP region for resources
+    default: us-central1
+  zone:
+    description: GCP zone for the cluster
+    default: us-central1-a

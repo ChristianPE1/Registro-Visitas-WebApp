@@ -1,0 +1,4 @@
+config:
+  gcp:project: cpe-autoscaling-k8s
+  gcp:region: us-central1
+  gcp:zone: us-central1-a

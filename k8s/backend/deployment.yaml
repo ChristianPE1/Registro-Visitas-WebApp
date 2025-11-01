@@ -8,7 +8,6 @@ metadata:
     environment: production
 ---
 # Backend - Secret para conexión a base de datos
-# Los valores se llenarán desde Pulumi
 apiVersion: v1
 kind: Secret
 metadata:
@@ -86,7 +85,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: backend
-        image: DOCKER_IMAGE_PLACEHOLDER  # Se reemplazará con imagen real
+        image: DOCKER_IMAGE_PLACEHOLDER
         imagePullPolicy: Always
         ports:
         - containerPort: 5000
@@ -152,7 +151,7 @@ spec:
             memory: 128Mi
           limits:
             cpu: 500m
-            memory: 512Mi
+            memory: 256Mi
 ---
 # Backend - Service
 apiVersion: v1
@@ -188,23 +187,23 @@ spec:
     kind: Deployment
     name: backend
   minReplicas: 2
-  maxReplicas: 10
+  maxReplicas: 20
   metrics:
   - type: Resource
     resource:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 70  # Escala cuando CPU > 70%
+        averageUtilization: 60  # Escala cuando CPU > 60%
   - type: Resource
     resource:
       name: memory
       target:
         type: Utilization
-        averageUtilization: 80  # Escala cuando RAM > 80%
+        averageUtilization: 70  # Escala cuando RAM > 70%
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 300  # Espera 5 min antes de reducir
+      stabilizationWindowSeconds: 60  # Espera 1 min antes de reducir (más rápido)
       policies:
       - type: Percent
         value: 50

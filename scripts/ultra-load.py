@@ -17,9 +17,9 @@ if not LB_IP:
     sys.exit(1)
 
 BASE_URL = f"http://{LB_IP}"
-WORKERS = 4  # Número de procesos paralelos
-CONCURRENT_PER_WORKER = 100  # Peticiones concurrentes por worker
-DURATION_SECONDS = 300  # 5 minutos de carga continua
+WORKERS = 8  # Número de procesos paralelos
+CONCURRENT_PER_WORKER = 150  # Peticiones concurrentes por worker
+DURATION_SECONDS = 600  # 10 minutos de carga continua
 
 # Stats globales por worker
 worker_stats = []

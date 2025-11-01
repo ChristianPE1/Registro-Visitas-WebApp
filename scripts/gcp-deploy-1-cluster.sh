@@ -1,19 +1,16 @@
 #!/bin/bash
-set -e  # Salir si hay error
+set -e
 
 echo "=================================================="
-echo "PASO 1: Desplegar Cluster AKS"
+echo "PASO 1: Desplegar GKE Cluster"
 echo "=================================================="
 
-# Ir al directorio correcto
-cd "$(dirname "$0")/../infrastructure-k8s-base"
+cd "$(dirname "$0")/../infrastructure-gcp-base"
 
-# Verificar que estamos en el lugar correcto
 if [ ! -f "__main__.py" ]; then
     echo "Error: No se encontró __main__.py"
     exit 1
 fi
-
 
 # Crear y activar entorno virtual
 if [ ! -d "venv" ]; then
@@ -37,28 +34,22 @@ if ! pulumi stack select production 2>/dev/null; then
     pulumi stack init production
 fi
 
-# Verificar si existe SSH key
-if [ ! -f "$HOME/.ssh/aks_key.pub" ]; then
-    echo "Generando SSH key..."
-    ssh-keygen -t rsa -b 4096 -f "$HOME/.ssh/aks_key" -N ""
-fi
+# Configurar proyecto de GCP
+echo "Configurando proyecto GCP..."
+pulumi config set gcp:project cpe-autoscaling-k8s
+pulumi config set gcp:region us-central1
+pulumi config set gcp:zone us-central1-a
 
-# Configurar SSH key
-echo "Configurando SSH key..."
-pulumi config set ssh_public_key "$(cat $HOME/.ssh/aks_key.pub)"
-
-# Verificar configuración
-echo ""
 echo "Configuración actual:"
 pulumi config
-echo ""
+
 # Desplegar
 pulumi up --yes
 
-echo " Outputs:"
+
+echo "Outputs:"
 pulumi stack output
 
-echo ""
 echo "=================================================="
 echo "✅ PASO 1 COMPLETADO"
 echo "=================================================="

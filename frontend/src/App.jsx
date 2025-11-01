@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+// Usar ruta relativa para que funcione con el proxy de nginx
+const API_URL = ''
 
 function App() {
   const [visits, setVisits] = useState({ total_visits: 0, recent_visits: [] })
@@ -39,23 +40,23 @@ function App() {
     try {
       await axios.post(`${API_URL}/api/visit`)
       fetchVisits()
-      setMessage('✅ Visita registrada!')
+      setMessage('Visita registrada correctamente')
       setTimeout(() => setMessage(''), 3000)
     } catch (error) {
-      setMessage('❌ Error al registrar visita')
+      setMessage('Error al registrar visita')
       console.error('Error registering visit:', error)
     }
   }
 
   const runStressTest = async () => {
     setLoading(true)
-    setMessage('⚡ Ejecutando prueba de carga...')
+    setMessage('Ejecutando prueba de carga...')
     try {
       const response = await axios.post(`${API_URL}/api/stress`, stressConfig)
-      setMessage(`✅ Prueba completada en ${response.data.duration.toFixed(2)}s`)
+      setMessage(`Prueba completada en ${response.data.duration.toFixed(2)}s`)
       fetchMetrics()
     } catch (error) {
-      setMessage('❌ Error en prueba de carga')
+      setMessage('Error en prueba de carga')
       console.error('Error running stress test:', error)
     } finally {
       setLoading(false)
@@ -65,16 +66,16 @@ function App() {
 
   const runMultipleRequests = async () => {
     setLoading(true)
-    setMessage('🚀 Ejecutando múltiples peticiones...')
+    setMessage('Ejecutando múltiples peticiones...')
     try {
       const requests = Array(50).fill().map(() => 
         axios.post(`${API_URL}/api/visit`)
       )
       await Promise.all(requests)
       fetchVisits()
-      setMessage('✅ 50 peticiones completadas!')
+      setMessage('50 peticiones completadas correctamente')
     } catch (error) {
-      setMessage('❌ Error en peticiones múltiples')
+      setMessage('Error en peticiones múltiples')
       console.error('Error running multiple requests:', error)
     } finally {
       setLoading(false)
@@ -85,14 +86,14 @@ function App() {
   return (
     <div className="App">
       <header className="header">
-        <h1>🚀 Sistema de Autoscaling Demo</h1>
-        <p>Aplicación ligera para demostrar autoscaling en la nube</p>
+        <h1>Sistema de Autoscaling</h1>
+        <p>Demostración de autoscaling en Kubernetes</p>
       </header>
 
       <div className="container">
         {/* Métricas del sistema */}
         <div className="card">
-          <h2>📊 Métricas en Tiempo Real</h2>
+          <h2>Métricas en Tiempo Real</h2>
           <div className="metrics">
             <div className="metric">
               <span className="metric-label">CPU:</span>
@@ -119,7 +120,7 @@ function App() {
 
         {/* Contador de visitas */}
         <div className="card">
-          <h2>👥 Contador de Visitas</h2>
+          <h2>Contador de Visitas</h2>
           <div className="visit-counter">
             <h3>{visits.total_visits}</h3>
             <p>Visitas totales</p>
@@ -131,7 +132,7 @@ function App() {
 
         {/* Pruebas de carga */}
         <div className="card">
-          <h2>⚡ Pruebas de Carga</h2>
+          <h2>Pruebas de Carga</h2>
           <div className="stress-config">
             <div className="input-group">
               <label>Duración (segundos):</label>
@@ -183,7 +184,7 @@ function App() {
         {/* Visitas recientes */}
         {visits.recent_visits.length > 0 && (
           <div className="card">
-            <h2>📋 Últimas Visitas</h2>
+            <h2>Últimas Visitas</h2>
             <div className="recent-visits">
               {visits.recent_visits.map((visit) => (
                 <div key={visit.id} className="visit-item">

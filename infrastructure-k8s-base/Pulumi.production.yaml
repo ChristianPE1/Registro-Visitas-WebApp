@@ -1,3 +1,3 @@
 config:
-  k8s-base:location: eastus
-  k8s-base:ssh_public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... # Placeholder - reemplazar con tu clave pública
+  k8s-base:location: westus
+  k8s-base:ssh_public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDPtHhz0A2K37Pv1pKqLVbzOUiU4QcvCl464C7EHNCSBr8k3vSmFXQ4spyp72AD77YOKnrAdMv+XsEoDeHB+xUtwkWlCHomQOTawmuyiKoV02cJKyOB6jhCu5pnhDgDbHGjv41KaopCzwFyJzFVQaEaLShaX5cV0DDcp51VfLg4PhWsbV+lTI1z0FYzkERCVaAvxeIiLlcEWmoFWwaaBp8+RdLdtZ+P3r1UQD09sIxngI8+JKT+Q+/fnjm0dAO1KNe2hWFwiw+ColoBZcmOQroyn9sE4/2O5TID1+cGi2DsAzFlrcf+0uPiPKqqqFiY2dUfIs/YS9/ouOrZysvn7+8PLpH4tp1sggqCuDY9yvrR87xXH4GDHuwdTHY9W4RzYpwj5hJrF+FF3v6jDJ/bY/cyNUn+TeiIxm4l8SoRe6S1M0hEAVpxCy+77o4J9Tk3TVQvSXS+aUURlAyqENmbuno4zNJfcj35h9+lSYZdt+hvaDzGxufq2Lgg/+IXvNMMTSIqku/zzvqvD9dfzaj99qDNuYqFuQ/Kd2RD+uYgewzDSKgLeLcvnGF94aMd7IuNbLHilH2rS/1vdSnivG1g6NK4xNwPU0Mp1Au5RwXd/b3uyyZ+SunA8EE2kcLsvKj5lXtzfzvXz5mUFwFxot1dnh06lzaiPHOhEozpeHiWUFJagw== christianpe@localhost1 # Placeholder - reemplazar con tu clave pública

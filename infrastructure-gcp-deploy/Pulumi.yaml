@@ -1,0 +1,12 @@
+name: gcp-deploy
+runtime: python
+description: Deploy applications to GKE cluster
+
+config:
+  backend_image:
+    description: Backend Docker image (in Artifact Registry)
+  frontend_image:
+    description: Frontend Docker image (in Artifact Registry)
+  db_admin_password:
+    description: Password for PostgreSQL database
+    secret: true

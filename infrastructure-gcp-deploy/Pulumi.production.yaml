@@ -1,0 +1,6 @@
+config:
+  gcp:project: cpe-autoscaling-k8s
+  gcp-deploy:backend_image: us-central1-docker.pkg.dev/cpe-autoscaling-k8s/autoscaling-repo/autoscaling-backend:v1
+  gcp-deploy:frontend_image: us-central1-docker.pkg.dev/cpe-autoscaling-k8s/autoscaling-repo/autoscaling-frontend:v1
+  gcp-deploy:db_admin_password:
+    secure: AAABAAHAt0RncKrVj4cAHMUZwfg2Z81FFrnK2eXL8+/qYs6tSTypu6MMAYScYv7be4TL/Vmdh7IxR0wfCZ/UDzJfJBkNv42bICnVkg==
