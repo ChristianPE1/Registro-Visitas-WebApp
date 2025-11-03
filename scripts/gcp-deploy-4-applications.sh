@@ -82,8 +82,26 @@ pulumi config set --secret db_admin_password "$DB_PASSWORD"
 echo "Configuración actual:"
 pulumi config
 
-# Desplegar
-pulumi up --yes
+# Intentar desplegar
+echo "Desplegando aplicaciones..."
+if ! pulumi up --yes 2>&1 | tee /tmp/pulumi-deploy.log; then
+    # Si falla, verificar si es por cluster unreachable
+    if grep -q "configured Kubernetes cluster is unreachable" /tmp/pulumi-deploy.log; then
+        echo "Detectado error: cluster antiguo inaccesible"
+        echo "Limpiando recursos olvidados del anterior state..."
+        
+        # Limpiar recursos del cluster antiguo
+        PULUMI_K8S_DELETE_UNREACHABLE=true pulumi refresh --yes
+        
+        echo "State limpio. Reintentando deployment..."
+        
+        # Reintentar deployment
+        pulumi up --yes
+    else
+        echo "Error en deployment. Revisa los logs arriba."
+        exit 1
+    fi
+fi
 
 echo "Outputs:"
 pulumi stack output

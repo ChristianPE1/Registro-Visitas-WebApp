@@ -1,6 +1,8 @@
-# 🚀 Sistema de Autoscaling con Kubernetes en Azure (AKS)
+# 🚀 Sistema de Autoscaling con Kubernetes (GKE / AKS)
 
-Sistema de demostración de autoscaling automático desplegado en Azure Kubernetes Service (AKS) con infraestructura como código usando Pulumi.
+Sistema de demostración de autoscaling automático desplegado en Google Kubernetes Engine (GKE) o Azure Kubernetes Service (AKS) con infraestructura como código usando Pulumi.
+
+> **Nota**: Este proyecto soporta tanto GCP como Azure. Las instrucciones actuales están enfocadas en **GCP (GKE)**. Para Azure, consulta las carpetas `infrastructure-k8s-*`.
 
 ## 📐 Arquitectura
 
@@ -118,6 +120,74 @@ sistema-autoscaling/
 ```
 
 ## 🚀 Despliegue Completo
+
+### Opción A: Despliegue Automatizado en GCP (Recomendado)
+
+**Pre-requisitos**:
+```bash
+# Instalar gcloud CLI
+curl https://sdk.cloud.google.com | bash
+exec -l $SHELL
+
+# Login a GCP
+gcloud auth login
+gcloud auth application-default login
+
+# Configurar proyecto
+gcloud config set project cpe-autoscaling-k8s
+
+# Instalar Pulumi
+curl -fsSL https://get.pulumi.com | sh
+
+# Instalar kubectl
+gcloud components install kubectl
+
+# Instalar Docker
+sudo apt-get update && sudo apt-get install docker.io -y
+
+# Instalar plugin de autenticación GKE
+gcloud components install gke-gcloud-auth-plugin
+```
+
+**Despliegue automatizado** (todos los pasos):
+```bash
+cd scripts
+
+# Desplegar todo (cluster, DB, imágenes, apps)
+bash gcp-deploy-all.sh
+```
+
+⏱️ **Tiempo total**: 35-40 minutos
+
+**Pasos individuales** (si prefieres control manual):
+```bash
+# Paso 1: Cluster GKE (12-15 min)
+bash gcp-deploy-1-cluster.sh
+
+# Paso 2: Cloud SQL (15 min)
+bash gcp-deploy-2-database.sh
+
+# Paso 3: Imágenes Docker (3-5 min)
+bash gcp-deploy-3-docker-images.sh
+
+# Paso 4: Aplicaciones K8s (2-3 min)
+bash gcp-deploy-4-applications.sh
+
+# Paso 5: Verificación (1 min)
+bash gcp-deploy-5-verify.sh
+```
+
+**Obtener URL del frontend**:
+```bash
+kubectl get svc frontend-service -n frontend -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+# O desde Pulumi:
+cd infrastructure-gcp-deploy
+pulumi stack output frontend_url
+```
+
+---
+
+### Opción B: Despliegue Manual en Azure (Legacy)
 
 ### Paso 0: Pre-requisitos
 ```bash
@@ -343,10 +413,156 @@ kubectl top pods -n backend
 
 **Total**: $92-302/mes (según autoscaling)
 
-## 🗑️ Destruir Infraestructura
+## � Troubleshooting
+
+### Error: "configured Kubernetes cluster is unreachable"
+
+**Síntoma**: Al ejecutar `pulumi up` en el stack de deploy, aparece:
+```
+error: configured Kubernetes cluster is unreachable: unable to load schema information from the API server: 
+Get "https://<OLD_IP>/openapi/v2?timeout=32s": dial tcp <OLD_IP>:443: i/o timeout
+```
+
+**Causa**: El Pulumi state tiene referencias a un cluster antiguo que fue destruido y recreado con una nueva IP. Pulumi intenta eliminar recursos del cluster viejo antes de crear en el nuevo.
+
+**Solución automática** (incluida en script `gcp-deploy-4-applications.sh`):
+```bash
+cd infrastructure-gcp-deploy  # o infrastructure-k8s-deploy para Azure
+source venv/bin/activate
+
+# Limpiar recursos huérfanos del state
+PULUMI_K8S_DELETE_UNREACHABLE=true pulumi refresh --yes
+
+# Redeployar
+pulumi up --yes
+```
+
+**Solución manual** (si el script falla):
+```bash
+# Opción 1: Eliminar recursos específicos del state
+pulumi state delete 'kubernetes:core/v1:Service::backend-service'
+pulumi state delete 'kubernetes:core/v1:Service::frontend-service'
+# ... (repetir para cada recurso huérfano)
+
+# Opción 2: Destruir y recrear el stack completo
+pulumi stack rm production --yes
+pulumi stack init production
+# Reconfigurar (backend_image, frontend_image, db_password)
+pulumi up --yes
+```
+
+### Error: "Failed to create deployment" o pods en estado "ImagePullBackOff"
+
+**Causa**: Las imágenes Docker no están disponibles en el registry o faltan permisos.
+
+**Solución**:
+```bash
+# Para GCP:
+gcloud auth configure-docker us-central1-docker.pkg.dev
+docker push <IMAGE_URL>
+
+# Para Azure:
+az acr login --name <ACR_NAME>
+docker push <IMAGE_URL>
+
+# Verificar que la imagen existe
+docker images | grep autoscaling
+
+# Verificar permisos (GCP)
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+  --member=serviceAccount:<SA>@<PROJECT>.iam.gserviceaccount.com \
+  --role=roles/artifactregistry.reader
+
+# Verificar permisos (Azure)
+az aks update -g <RG> -n <CLUSTER> --attach-acr <ACR_NAME>
+```
+
+### Error: HPA muestra "unknown" en targets
+
+**Causa**: `metrics-server` no está instalado o no está funcionando.
+
+**Solución**:
+```bash
+# Verificar si existe
+kubectl get deployment metrics-server -n kube-system
+
+# Instalar si falta (GKE lo incluye por defecto)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# Para clusters locales (minikube, kind):
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl patch deployment metrics-server -n kube-system --type='json' \
+  -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]'
+
+# Verificar métricas
+kubectl top nodes
+kubectl top pods -n backend
+```
+
+### Pods no escalan aunque HPA esté configurado
+
+**Causas posibles**:
+1. **Umbrales demasiado altos**: CPU/memoria nunca alcanzan el target
+2. **Requests no configurados**: HPA necesita `resources.requests` en el pod
+3. **Carga insuficiente**: La aplicación no genera suficiente presión
+
+**Solución**:
+```bash
+# 1. Verificar configuración actual del HPA
+kubectl describe hpa backend-hpa -n backend
+
+# 2. Ajustar umbrales (ejemplo: reducir CPU de 70% a 60%)
+kubectl patch hpa backend-hpa -n backend --type='json' -p='[
+  {"op": "replace", "path": "/spec/metrics/0/resource/target/averageUtilization", "value": 60}
+]'
+
+# 3. Verificar que los pods tienen requests configurados
+kubectl get deployment backend -n backend -o yaml | grep -A 3 requests
+
+# 4. Generar carga para probar
+cd scripts
+python3 ultra-load.py <FRONTEND_IP>
+```
+
+### Nodos no escalan (Cluster Autoscaler)
+
+**Causas posibles**:
+1. **Pods caben en nodos existentes**: Cluster Autoscaler solo añade nodos si hay pods Pending
+2. **Limits muy altos**: Muchos pods caben por nodo, nunca hay Pending
+3. **Max node count alcanzado**: Node pool llegó al límite
+
+**Solución**:
+```bash
+# 1. Verificar pods en estado Pending
+kubectl get pods -A | grep Pending
+
+# 2. Verificar configuración del node pool (GCP)
+gcloud container node-pools describe primary-pool \
+  --cluster=<CLUSTER_NAME> --zone=<ZONE>
+
+# 3. Reducir memory limits para aumentar densidad de pods
+kubectl set resources deployment backend -n backend \
+  --limits=cpu=500m,memory=256Mi \
+  --requests=cpu=100m,memory=128Mi
+
+# 4. Verificar eventos del Cluster Autoscaler
+kubectl get events -n kube-system --sort-by='.lastTimestamp' | grep -i scale
+
+# 5. Forzar creación de pods para demostrar scaling
+kubectl scale deployment backend -n backend --replicas=15
+```
+
+## �🗑️ Destruir Infraestructura
 
 **Importante**: Destruir en orden inverso al despliegue.
 
+**Para GCP** (usa el script automatizado):
+```bash
+cd scripts
+bash destroy-all.sh
+```
+
+**Para Azure** (manual):
 ```bash
 # 1. Eliminar aplicaciones
 cd infrastructure-k8s-deploy
