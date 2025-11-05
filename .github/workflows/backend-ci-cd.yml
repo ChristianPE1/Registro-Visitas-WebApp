@@ -1,5 +1,9 @@
 name: Backend CI/CD
 
+concurrency:
+  group: gcp-deploy-stack-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches:
