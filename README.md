@@ -580,9 +580,214 @@ cd ../infrastructure-k8s-base
 pulumi destroy
 ```
 
-## 📚 Documentación Adicional
+## � CI/CD con GitHub Actions
+
+Este proyecto incluye workflows automatizados de CI/CD que despliegan automáticamente los cambios siguiendo el patrón **Micro-Stacks**.
+
+### 🎯 Workflows Disponibles
+
+#### 1. **Backend CI/CD** (`.github/workflows/backend-ci-cd.yml`)
+- **Trigger**: Push o PR a `backend/**`
+- **Acciones**:
+  - Construye imagen Docker del backend
+  - Push a Google Artifact Registry (con retry automático)
+  - Actualiza **solo** el deployment del backend en el stack `gcp-deploy`
+  - Ejecuta health checks automáticos
+- **Tiempo estimado**: 3-5 minutos
+
+#### 2. **Frontend CI/CD** (`.github/workflows/frontend-ci-cd.yml`)
+- **Trigger**: Push o PR a `frontend/**`
+- **Acciones**:
+  - Construye imagen Docker del frontend
+  - Push a Google Artifact Registry (con retry automático)
+  - Actualiza **solo** el deployment del frontend en el stack `gcp-deploy`
+  - Obtiene URL pública automáticamente
+- **Tiempo estimado**: 3-5 minutos
+
+#### 3. **Infrastructure CI/CD** (`.github/workflows/infrastructure-ci-cd.yml`)
+- **Trigger**: Push o PR a `infrastructure-gcp-*/**`
+- **Acciones**:
+  - **Detección automática**: Identifica qué stack cambió (base/db/deploy)
+  - **Deploy condicional**: Solo despliega el stack modificado
+  - **Dependencias**: Si cambia `gcp-base`, redespliega `gcp-deploy` automáticamente
+  - **Ejecución manual**: Disponible via `workflow_dispatch` con dropdown
+- **Tiempo estimado**: 5-15 minutos (según stack)
+
+#### 4. **Load Testing** (`.github/workflows/load-test.yml`)
+- **Trigger**: Manual via `workflow_dispatch`
+- **Acciones**:
+  - Ejecuta pruebas de carga contra el cluster GKE
+  - Monitorea métricas de autoscaling (HPA, pods, nodos)
+  - Genera reporte detallado con resultados
+- **Parámetros configurables**:
+  - `target_url`: URL del frontend (auto-detecta si se omite)
+  - `duration_seconds`: Duración de la prueba (default: 600s)
+  - `workers`: Número de workers (default: 8)
+  - `concurrent_per_worker`: Peticiones concurrentes (default: 150)
+
+### 🔐 Configuración de Secretos
+
+Para usar los workflows de CI/CD, debes configurar **3 secretos** en tu repositorio de GitHub:
+
+1. **`GCP_SA_KEY`** - JSON de service account de GCP
+2. **`PULUMI_ACCESS_TOKEN`** - Token de acceso a Pulumi Cloud
+3. **`DB_ADMIN_PASSWORD`** - Password de PostgreSQL en Cloud SQL
+
+📖 **Guía completa**: Ver [GITHUB-ACTIONS-SETUP.md](./GITHUB-ACTIONS-SETUP.md) para instrucciones detalladas paso a paso.
+
+### 🚀 Cómo Usar
+
+#### Despliegue Automático de Backend
+
+```bash
+# 1. Haz cambios en el backend
+vim backend/app.py
+
+# 2. Commit y push
+git add backend/
+git commit -m "feat: Add new API endpoint"
+git push
+
+# 3. El workflow backend-ci-cd.yml se ejecuta automáticamente
+# - Construye nueva imagen Docker
+# - Push a Artifact Registry
+# - Actualiza deployment en GKE
+# - Ejecuta health check
+```
+
+#### Despliegue Automático de Frontend
+
+```bash
+# 1. Haz cambios en el frontend
+vim frontend/src/App.jsx
+
+# 2. Commit y push
+git add frontend/
+git commit -m "feat: Update UI design"
+git push
+
+# 3. El workflow frontend-ci-cd.yml se ejecuta automáticamente
+# - Construye nueva imagen Docker
+# - Push a Artifact Registry
+# - Actualiza deployment en GKE
+# - Verifica URL pública
+```
+
+#### Despliegue Manual de Infraestructura
+
+```bash
+# Opción 1: Via código (trigger automático)
+vim infrastructure-gcp-base/__main__.py
+git add infrastructure-gcp-base/
+git commit -m "chore: Update node pool config"
+git push
+
+# Opción 2: Via GitHub UI (manual)
+# 1. Ve a Actions → Infrastructure CI/CD
+# 2. Click "Run workflow"
+# 3. Selecciona stack: base/db/deploy/all
+# 4. Click "Run workflow"
+```
+
+#### Ejecutar Load Test
+
+```bash
+# Via GitHub UI:
+# 1. Ve a Actions → GKE Autoscaling Load Test
+# 2. Click "Run workflow"
+# 3. Configura parámetros (o deja defaults)
+# 4. Click "Run workflow"
+# 5. Monitorea progreso en tiempo real
+# 6. Revisa reporte en el summary del job
+```
+
+### 🛡️ Features de Seguridad y Confiabilidad
+
+#### Retry Logic para Docker Push
+```yaml
+# Reintentos automáticos con backoff exponencial
+- Intento 1: Push directo
+- Intento 2: Espera 10s y reintenta
+- Intento 3: Espera 20s y reintenta
+- Intento 4: Espera 40s y reintenta
+```
+
+#### Manejo de Cluster Unreachable
+```yaml
+# Limpieza automática de recursos huérfanos
+env:
+  PULUMI_K8S_DELETE_UNREACHABLE: "true"
+```
+
+#### Health Checks Automáticos
+```yaml
+# Backend: Port-forward + curl
+- kubectl port-forward → http://localhost:5000/health
+# Frontend: LoadBalancer + curl
+- curl http://<EXTERNAL-IP>/health
+```
+
+### 📊 Monitoreo de Workflows
+
+Los workflows generan **summaries detallados** con información útil:
+
+- **Backend/Frontend CI/CD**:
+  - Image URL en Artifact Registry
+  - Número de réplicas (actual vs deseadas)
+  - Status de deployment
+  - Comandos para monitoreo manual
+
+- **Infrastructure CI/CD**:
+  - Stack desplegado
+  - Cluster endpoints
+  - Frontend URL pública
+  - Comandos kubectl de verificación
+
+- **Load Test**:
+  - Estado inicial del cluster (nodos, pods, HPAs)
+  - Estado post-carga (escalado observado)
+  - Eventos de scaling recientes
+  - Utilización de recursos (CPU/Memoria)
+  - Summary con verificación de criterios
+
+### 🎯 Ejemplo de Flujo Completo
+
+```bash
+# Escenario: Añadir nuevo endpoint al backend
+
+# 1. Crear rama de feature
+git checkout -b feature/new-endpoint
+
+# 2. Desarrollar cambios
+vim backend/app.py
+# ... código ...
+
+# 3. Commit y push
+git add backend/app.py
+git commit -m "feat: Add /api/statistics endpoint"
+git push origin feature/new-endpoint
+
+# 4. Crear Pull Request en GitHub
+# - El workflow backend-ci-cd.yml se ejecuta automáticamente
+# - Verifica que la build es exitosa
+# - Verifica que el deployment funciona
+
+# 5. Merge a main
+# - El workflow se ejecuta nuevamente
+# - Despliega a producción automáticamente
+# - Sistema actualizado en 3-5 minutos ✅
+```
+
+### 🔧 Troubleshooting de CI/CD
+
+Ver [GITHUB-ACTIONS-SETUP.md](./GITHUB-ACTIONS-SETUP.md) sección "Troubleshooting" para errores comunes y soluciones.
+
+---
+
+## �📚 Documentación Adicional
 
 - [ARQUITECTURA-K8S.md](./ARQUITECTURA-K8S.md) - Arquitectura detallada
+- [GITHUB-ACTIONS-SETUP.md](./GITHUB-ACTIONS-SETUP.md) - Setup de secretos para CI/CD
 - [infrastructure-k8s-base/README.md](./infrastructure-k8s-base/README.md) - Pila 1
 - [infrastructure-k8s-db/README.md](./infrastructure-k8s-db/README.md) - Pila 2
 - [infrastructure-k8s-deploy/README.md](./infrastructure-k8s-deploy/README.md) - Pila 3

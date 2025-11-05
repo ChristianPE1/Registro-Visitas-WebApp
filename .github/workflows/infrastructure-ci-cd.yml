@@ -1,0 +1,378 @@
+name: Infrastructure CI/CD (Micro-Stacks)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infrastructure-gcp-base/**'
+      - 'infrastructure-gcp-db/**'
+      - 'infrastructure-gcp-deploy/**'
+      - '.github/workflows/infrastructure-ci-cd.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infrastructure-gcp-base/**'
+      - 'infrastructure-gcp-db/**'
+      - 'infrastructure-gcp-deploy/**'
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: 'Which stack to deploy (base/db/deploy/all)'
+        required: true
+        type: choice
+        options:
+          - base
+          - db
+          - deploy
+          - all
+
+env:
+  GCP_PROJECT_ID: cpe-autoscaling-k8s
+  GCP_REGION: us-central1
+
+jobs:
+  detect-changes:
+    name: Detect Changed Stacks
+    runs-on: ubuntu-latest
+    outputs:
+      base_changed: ${{ steps.changes.outputs.base }}
+      db_changed: ${{ steps.changes.outputs.db }}
+      deploy_changed: ${{ steps.changes.outputs.deploy }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Detect changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual dispatch: usar input del usuario
+            case "${{ github.event.inputs.stack }}" in
+              "base")
+                echo "base=true" >> $GITHUB_OUTPUT
+                echo "db=false" >> $GITHUB_OUTPUT
+                echo "deploy=false" >> $GITHUB_OUTPUT
+                ;;
+              "db")
+                echo "base=false" >> $GITHUB_OUTPUT
+                echo "db=true" >> $GITHUB_OUTPUT
+                echo "deploy=false" >> $GITHUB_OUTPUT
+                ;;
+              "deploy")
+                echo "base=false" >> $GITHUB_OUTPUT
+                echo "db=false" >> $GITHUB_OUTPUT
+                echo "deploy=true" >> $GITHUB_OUTPUT
+                ;;
+              "all")
+                echo "base=true" >> $GITHUB_OUTPUT
+                echo "db=true" >> $GITHUB_OUTPUT
+                echo "deploy=true" >> $GITHUB_OUTPUT
+                ;;
+            esac
+          else
+            # Push/PR automático: detectar cambios por path
+            if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "^infrastructure-gcp-base/"; then
+              echo "base=true" >> $GITHUB_OUTPUT
+            else
+              echo "base=false" >> $GITHUB_OUTPUT
+            fi
+            
+            if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "^infrastructure-gcp-db/"; then
+              echo "db=true" >> $GITHUB_OUTPUT
+            else
+              echo "db=false" >> $GITHUB_OUTPUT
+            fi
+            
+            if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "^infrastructure-gcp-deploy/"; then
+              echo "deploy=true" >> $GITHUB_OUTPUT
+            else
+              echo "deploy=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+      
+      - name: Summary of changes
+        run: |
+          echo "## Infrastructure Changes Detected 🔍" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Base Stack (GKE Cluster)**: ${{ steps.changes.outputs.base }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **DB Stack (Cloud SQL)**: ${{ steps.changes.outputs.db }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy Stack (Applications)**: ${{ steps.changes.outputs.deploy }}" >> $GITHUB_STEP_SUMMARY
+
+  deploy-base:
+    name: Deploy Base Stack (GKE Cluster)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.base_changed == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v5
+      
+      - name: Install dependencies
+        working-directory: infrastructure-gcp-base
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Pulumi preview
+        if: github.event_name == 'pull_request'
+        uses: pulumi/actions@v5
+        with:
+          command: preview
+          stack-name: production
+          work-dir: infrastructure-gcp-base
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Pulumi up
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: pulumi/actions@v5
+        with:
+          command: up
+          stack-name: production
+          work-dir: infrastructure-gcp-base
+          upsert: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Get cluster info
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        working-directory: infrastructure-gcp-base
+        run: |
+          pulumi stack output cluster_name
+          pulumi stack output cluster_endpoint
+      
+      - name: Deployment Summary
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "## Base Stack Deployed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### GKE Cluster" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack**: infrastructure-gcp-base" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Deployed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️  **Note**: Changes to cluster may require redeploying applications (deploy stack)" >> $GITHUB_STEP_SUMMARY
+
+  deploy-db:
+    name: Deploy DB Stack (Cloud SQL)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.db_changed == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v5
+      
+      - name: Install dependencies
+        working-directory: infrastructure-gcp-db
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Configure DB password
+        working-directory: infrastructure-gcp-db
+        run: |
+          pulumi stack select production
+          pulumi config set --secret db_admin_password "${{ secrets.DB_ADMIN_PASSWORD }}"
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Pulumi preview
+        if: github.event_name == 'pull_request'
+        uses: pulumi/actions@v5
+        with:
+          command: preview
+          stack-name: production
+          work-dir: infrastructure-gcp-db
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Pulumi up
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: pulumi/actions@v5
+        with:
+          command: up
+          stack-name: production
+          work-dir: infrastructure-gcp-db
+          upsert: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Get DB info
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        working-directory: infrastructure-gcp-db
+        run: |
+          pulumi stack output postgres_instance_name
+          pulumi stack output database_name
+      
+      - name: Deployment Summary
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "## DB Stack Deployed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Cloud SQL PostgreSQL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack**: infrastructure-gcp-db" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Deployed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️  **Note**: DB password is stored as secret. Update applications if connection string changed." >> $GITHUB_STEP_SUMMARY
+
+  deploy-applications:
+    name: Deploy Applications Stack
+    runs-on: ubuntu-latest
+    needs: [detect-changes, deploy-base, deploy-db]
+    if: |
+      always() && 
+      (needs.detect-changes.outputs.deploy_changed == 'true' || 
+       needs.deploy-base.result == 'success' || 
+       needs.deploy-db.result == 'success')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+      
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials cpe-autoscaling-gke \
+            --zone=us-central1-a \
+            --project=${{ env.GCP_PROJECT_ID }}
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v5
+      
+      - name: Install dependencies
+        working-directory: infrastructure-gcp-deploy
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Configure secrets
+        working-directory: infrastructure-gcp-deploy
+        run: |
+          pulumi stack select production
+          pulumi config set --secret db_admin_password "${{ secrets.DB_ADMIN_PASSWORD }}"
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Pulumi refresh (handle unreachable clusters)
+        working-directory: infrastructure-gcp-deploy
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_K8S_DELETE_UNREACHABLE: "true"
+        run: |
+          pulumi refresh --yes || echo "Refresh completed with warnings"
+      
+      - name: Pulumi preview
+        if: github.event_name == 'pull_request'
+        uses: pulumi/actions@v5
+        with:
+          command: preview
+          stack-name: production
+          work-dir: infrastructure-gcp-deploy
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Pulumi up
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: pulumi/actions@v5
+        with:
+          command: up
+          stack-name: production
+          work-dir: infrastructure-gcp-deploy
+          upsert: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_K8S_DELETE_UNREACHABLE: "true"
+      
+      - name: Wait for deployments
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          kubectl rollout status deployment/backend -n backend --timeout=5m
+          kubectl rollout status deployment/frontend -n frontend --timeout=5m
+      
+      - name: Get deployment info
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        id: deployment-info
+        run: |
+          FRONTEND_URL=$(kubectl get svc frontend-service -n frontend -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          BACKEND_REPLICAS=$(kubectl get deployment backend -n backend -o jsonpath='{.status.replicas}')
+          FRONTEND_REPLICAS=$(kubectl get deployment frontend -n frontend -o jsonpath='{.status.replicas}')
+          
+          echo "frontend_url=http://$FRONTEND_URL" >> $GITHUB_OUTPUT
+          echo "backend_replicas=$BACKEND_REPLICAS" >> $GITHUB_OUTPUT
+          echo "frontend_replicas=$FRONTEND_REPLICAS" >> $GITHUB_OUTPUT
+      
+      - name: Deployment Summary
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "## Applications Deployed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend**: ${{ steps.deployment-info.outputs.backend_replicas }} replicas" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend**: ${{ steps.deployment-info.outputs.frontend_replicas }} replicas" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Access" >> $GITHUB_STEP_SUMMARY
+          echo "🌐 **Application URL**: [${{ steps.deployment-info.outputs.frontend_url }}](${{ steps.deployment-info.outputs.frontend_url }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Monitoring" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl get hpa -A" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl top nodes" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl top pods -n backend" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

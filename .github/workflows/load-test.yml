@@ -1,118 +1,155 @@
-name: Autoscaling Load Test
+name: GKE Autoscaling Load Test
 
 on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'Target URL (ALB DNS or custom domain)'
-        required: true
-        type: string
-      num_requests:
-        description: 'Total number of requests'
+        description: 'Target URL (Frontend LoadBalancer IP or leave empty for auto-detect)'
         required: false
-        default: '2000'
         type: string
-      concurrent_requests:
-        description: 'Concurrent requests'
+      duration_seconds:
+        description: 'Test duration in seconds'
         required: false
-        default: '100'
+        default: '600'
         type: string
-      test_duration:
-        description: 'Test duration in minutes'
+      workers:
+        description: 'Number of worker processes'
         required: false
-        default: '10'
+        default: '8'
         type: string
+      concurrent_per_worker:
+        description: 'Concurrent requests per worker'
+        required: false
+        default: '150'
+        type: string
+
+env:
+  GCP_PROJECT_ID: cpe-autoscaling-k8s
 
 jobs:
   load-test:
-    name: Execute Load Test
+    name: Execute Load Test on GKE
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+      
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials cpe-autoscaling-gke \
+            --zone=us-central1-a \
+            --project=${{ env.GCP_PROJECT_ID }}
+      
+      - name: Get frontend URL (auto-detect)
+        id: get-url
+        run: |
+          if [ -z "${{ github.event.inputs.target_url }}" ]; then
+            echo "Auto-detecting frontend URL..."
+            FRONTEND_IP=$(kubectl get svc frontend-service -n frontend -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            echo "TARGET_URL=http://$FRONTEND_IP" >> $GITHUB_ENV
+          else
+            echo "TARGET_URL=${{ github.event.inputs.target_url }}" >> $GITHUB_ENV
+          fi
+          echo "Using target URL: $TARGET_URL"
       
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       
       - name: Install dependencies
         run: |
-          pip install aiohttp matplotlib pandas
+          pip install aiohttp
+      
+      - name: Capture initial state
+        run: |
+          echo "## Initial Cluster State 📊" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "Nodes:" >> $GITHUB_STEP_SUMMARY
+          kubectl get nodes >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Backend Pods:" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n backend >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "HPAs:" >> $GITHUB_STEP_SUMMARY
+          kubectl get hpa -n backend >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
       
       - name: Health Check
         run: |
           echo "🏥 Checking target health..."
-          curl -f ${{ inputs.target_url }}/health || echo "Warning: Health check failed"
+          curl -f "$TARGET_URL" || curl -f "$TARGET_URL/health" || echo "Warning: Health check returned non-200"
       
-      - name: Run Load Test - Phase 1 (Warm up)
+      - name: Run Load Test with ultra-load.py
         run: |
-          echo "🔥 Phase 1: Warming up..."
-          python scripts/load-test.py ${{ inputs.target_url }} 100 10
+          echo "🚀 Starting load test..."
+          echo "Target: $TARGET_URL"
+          echo "Workers: ${{ github.event.inputs.workers || '8' }}"
+          echo "Concurrent per worker: ${{ github.event.inputs.concurrent_per_worker || '150' }}"
+          echo "Duration: ${{ github.event.inputs.duration_seconds || '600' }}s"
+          
+          cd scripts
+          python3 ultra-load.py "$TARGET_URL" \
+            --workers ${{ github.event.inputs.workers || '8' }} \
+            --concurrent ${{ github.event.inputs.concurrent_per_worker || '150' }} \
+            --duration ${{ github.event.inputs.duration_seconds || '600' }} &
+          
+          LOAD_TEST_PID=$!
+          
+          # Monitorear cada 30 segundos durante la prueba
+          DURATION=${{ github.event.inputs.duration_seconds || '600' }}
+          CHECKS=$((DURATION / 30))
+          
+          for i in $(seq 1 $CHECKS); do
+            echo "📊 Status check $i/$CHECKS..."
+            kubectl get hpa -n backend || true
+            kubectl top pods -n backend || true
+            kubectl get nodes || true
+            sleep 30
+          done
+          
+          # Esperar a que termine el test
+          wait $LOAD_TEST_PID
       
-      - name: Wait for scale up
+      - name: Capture post-load state
         run: |
-          echo "⏳ Waiting 3 minutes for potential scale up..."
-          sleep 180
+          echo "## Post-Load Cluster State 📈" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "Nodes:" >> $GITHUB_STEP_SUMMARY
+          kubectl get nodes >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Backend Pods:" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n backend >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "HPAs:" >> $GITHUB_STEP_SUMMARY
+          kubectl get hpa -n backend >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
       
-      - name: Run Load Test - Phase 2 (Peak load)
+      - name: Cooldown monitoring
         run: |
-          echo "⚡ Phase 2: Peak load test..."
-          python scripts/load-test.py ${{ inputs.target_url }} ${{ inputs.num_requests }} ${{ inputs.concurrent_requests }}
-      
-      - name: Monitor for scale up
-        run: |
-          echo "📊 Monitoring for 5 minutes..."
-          for i in {1..10}; do
-            echo "Check $i/10"
-            curl -s ${{ inputs.target_url }}/api/metrics || true
+          echo "❄️ Cooldown period - monitoring scale down for 10 minutes..."
+          for i in {1..20}; do
+            echo "Cooldown check $i/20"
+            kubectl get hpa -n backend || true
+            kubectl get pods -n backend || true
             sleep 30
           done
       
-      - name: Run Load Test - Phase 3 (Sustained load)
-        run: |
-          echo "🔄 Phase 3: Sustained load..."
-          python scripts/load-test.py ${{ inputs.target_url }} 1000 50
-      
-      - name: Cooldown period
-        run: |
-          echo "❄️ Cooldown period - waiting for scale down..."
-          sleep 300
-      
-      - name: Final metrics check
-        run: |
-          echo "📈 Final metrics:"
-          curl -s ${{ inputs.target_url }}/api/metrics || true
-          curl -s ${{ inputs.target_url }}/api/visits || true
-      
-      - name: Generate Report
-        if: always()
-        run: |
-          echo "## Load Test Report 📊" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target**: ${{ inputs.target_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Total Requests**: ${{ inputs.num_requests }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Concurrent**: ${{ inputs.concurrent_requests }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Duration**: ${{ inputs.test_duration }} minutes" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Phases" >> $GITHUB_STEP_SUMMARY
-          echo "1. ✅ Warm up (100 requests)" >> $GITHUB_STEP_SUMMARY
-          echo "2. ✅ Peak load (${{ inputs.num_requests }} requests)" >> $GITHUB_STEP_SUMMARY
-          echo "3. ✅ Sustained load (1000 requests)" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✅ Cooldown period" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Expected Behavior" >> $GITHUB_STEP_SUMMARY
-          echo "- ASG should scale from 1 to 2-3 instances during peak load" >> $GITHUB_STEP_SUMMARY
-          echo "- CPU alarm should trigger when > 70%" >> $GITHUB_STEP_SUMMARY
-          echo "- Scale down should occur after ~5 minutes of low load" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Check CloudWatch Alarms in AWS Console" >> $GITHUB_STEP_SUMMARY
-          echo "2. Verify EC2 instance count in Auto Scaling Group" >> $GITHUB_STEP_SUMMARY
-          echo "3. Review ALB Target Health" >> $GITHUB_STEP_SUMMARY
-  
   verify-autoscaling:
     name: Verify Autoscaling Activity
     runs-on: ubuntu-latest
@@ -120,34 +157,81 @@ jobs:
     if: always()
     
     steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
       
-      - name: Get ASG Activity
-        run: |
-          echo "📋 Auto Scaling Group Activity:"
-          aws autoscaling describe-scaling-activities \
-            --auto-scaling-group-name autoscaling-demo-asg \
-            --max-records 10 \
-            --query 'Activities[*].[StartTime,Description,StatusCode]' \
-            --output table
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
       
-      - name: Get Current Instances
+      - name: Install GKE auth plugin
         run: |
-          echo "🖥️ Current EC2 Instances:"
-          aws ec2 describe-instances \
-            --filters "Name=tag:ManagedBy,Values=Pulumi" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PrivateIpAddress,LaunchTime]' \
-            --output table
+          gcloud components install gke-gcloud-auth-plugin --quiet
       
-      - name: Get CloudWatch Alarms
+      - name: Get GKE credentials
         run: |
-          echo "🚨 CloudWatch Alarm Status:"
-          aws cloudwatch describe-alarms \
-            --alarm-name-prefix "autoscaling-demo" \
-            --query 'MetricAlarms[*].[AlarmName,StateValue,StateReason]' \
-            --output table
+          gcloud container clusters get-credentials cpe-autoscaling-gke \
+            --zone us-central1-a \
+            --project ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Collect final metrics
+        run: |
+          echo "## 🔍 Autoscaling Verification Results" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Final Cluster State" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "=== NODES ===" >> $GITHUB_STEP_SUMMARY
+          kubectl get nodes -o wide >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "=== BACKEND DEPLOYMENT ===" >> $GITHUB_STEP_SUMMARY
+          kubectl get deployment -n backend >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "=== BACKEND PODS ===" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n backend -o wide >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "=== HPA STATUS ===" >> $GITHUB_STEP_SUMMARY
+          kubectl get hpa -n backend >> $GITHUB_STEP_SUMMARY
+          kubectl describe hpa backend-hpa -n backend >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Get scaling events
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Recent Scaling Events 📋" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get events -n backend --sort-by='.lastTimestamp' | grep -E "Scaled|Normal" | tail -20 >> $GITHUB_STEP_SUMMARY || echo "No scaling events found" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Resource utilization
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resource Utilization 📊" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "=== NODE METRICS ===" >> $GITHUB_STEP_SUMMARY
+          kubectl top nodes >> $GITHUB_STEP_SUMMARY || echo "Metrics not available" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "=== POD METRICS (Backend) ===" >> $GITHUB_STEP_SUMMARY
+          kubectl top pods -n backend >> $GITHUB_STEP_SUMMARY || echo "Metrics not available" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Summary
+        run: |
+          NODE_COUNT=$(kubectl get nodes --no-headers | wc -l)
+          POD_COUNT=$(kubectl get pods -n backend --no-headers | wc -l)
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Summary ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Nodes in cluster**: $NODE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend pods**: $POD_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Load test duration**: ${{ github.event.inputs.duration_seconds || '600' }}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workers**: ${{ github.event.inputs.workers || '8' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Concurrent per worker**: ${{ github.event.inputs.concurrent_per_worker || '150' }}" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note**: Check the detailed logs above to verify if:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Backend pods scaled up during load" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Cluster nodes scaled up if needed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ HPA metrics show increased CPU/Memory" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Scaling events were triggered" >> $GITHUB_STEP_SUMMARY

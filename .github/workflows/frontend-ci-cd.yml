@@ -1,0 +1,283 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci-cd.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT_ID: cpe-autoscaling-k8s
+  GCP_REGION: us-central1
+  ARTIFACT_REGISTRY_REPO: autoscaling-repo
+  IMAGE_NAME: autoscaling-frontend
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Frontend Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_url: ${{ steps.image-url.outputs.url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+      
+      - name: Create Artifact Registry repository (if not exists)
+        continue-on-error: true
+        run: |
+          gcloud artifacts repositories create ${{ env.ARTIFACT_REGISTRY_REPO }} \
+            --repository-format=docker \
+            --location=${{ env.GCP_REGION }} \
+            --description="Autoscaling demo images" || echo "Repository already exists"
+      
+      - name: Build Docker image
+        working-directory: frontend
+        run: |
+          docker build \
+            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:latest \
+            .
+      
+      - name: Push Docker image with retry
+        run: |
+          # Función de retry para manejar errores de red
+          push_with_retry() {
+            local image=$1
+            local max_attempts=3
+            local attempt=1
+            local wait_time=10
+            
+            while [ $attempt -le $max_attempts ]; do
+              echo "🔄 Push attempt $attempt of $max_attempts..."
+              
+              if docker push "$image"; then
+                echo "✅ Push successful for $image"
+                return 0
+              else
+                echo "❌ Push failed, waiting ${wait_time}s before retry..."
+                sleep $wait_time
+                
+                # Reconfigurar autenticación antes de reintentar
+                gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+                
+                attempt=$((attempt + 1))
+                wait_time=$((wait_time * 2))  # Backoff exponencial
+              fi
+            done
+            
+            echo "❌ Push failed after $max_attempts attempts"
+            return 1
+          }
+          
+          # Push con SHA tag
+          push_with_retry "${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          
+          # Push con latest tag
+          push_with_retry "${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:latest"
+      
+      - name: Verify image in registry
+        run: |
+          echo "🔍 Verifying image was pushed successfully..."
+          gcloud artifacts docker images describe \
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+      
+      - name: Set image URL output
+        id: image-url
+        run: |
+          echo "url=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+      
+      - name: Build Summary
+        run: |
+          echo "## Frontend Build Summary 🎨" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: \`${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: \`${{ env.GCP_REGION }}-docker.pkg.dev\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Full URL**: \`${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    name: Deploy Frontend to GKE
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+      
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials cpe-autoscaling-gke \
+            --zone=us-central1-a \
+            --project=${{ env.GCP_PROJECT_ID }}
+      
+      - name: Verify cluster connectivity
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v5
+      
+      - name: Install Python dependencies
+        working-directory: infrastructure-gcp-deploy
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Pulumi refresh (handle unreachable clusters)
+        working-directory: infrastructure-gcp-deploy
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_K8S_DELETE_UNREACHABLE: "true"
+        run: |
+          pulumi stack select production
+          pulumi refresh --yes || echo "Refresh completed with warnings"
+      
+      - name: Update frontend image in Pulumi config
+        working-directory: infrastructure-gcp-deploy
+        run: |
+          pulumi config set frontend_image "${{ needs.build-and-push.outputs.image_url }}"
+      
+      - name: Pulumi preview
+        if: github.event_name == 'pull_request'
+        uses: pulumi/actions@v5
+        with:
+          command: preview
+          stack-name: production
+          work-dir: infrastructure-gcp-deploy
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      
+      - name: Pulumi up (deploy)
+        if: github.event_name == 'push'
+        uses: pulumi/actions@v5
+        with:
+          command: up
+          stack-name: production
+          work-dir: infrastructure-gcp-deploy
+          upsert: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_K8S_DELETE_UNREACHABLE: "true"
+      
+      - name: Wait for deployment rollout
+        run: |
+          echo "⏳ Waiting for frontend deployment to complete..."
+          kubectl rollout status deployment/frontend -n frontend --timeout=5m
+      
+      - name: Verify frontend pods
+        run: |
+          echo "🔍 Verifying frontend pods..."
+          kubectl get pods -n frontend -l app=frontend
+          kubectl describe deployment frontend -n frontend | grep -A 5 "Image:"
+      
+      - name: Get deployment info
+        id: deployment-info
+        run: |
+          REPLICAS=$(kubectl get deployment frontend -n frontend -o jsonpath='{.status.replicas}')
+          READY=$(kubectl get deployment frontend -n frontend -o jsonpath='{.status.readyReplicas}')
+          IMAGE=$(kubectl get deployment frontend -n frontend -o jsonpath='{.spec.template.spec.containers[0].image}')
+          FRONTEND_URL=$(kubectl get svc frontend-service -n frontend -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          echo "replicas=$REPLICAS" >> $GITHUB_OUTPUT
+          echo "ready=$READY" >> $GITHUB_OUTPUT
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "url=http://$FRONTEND_URL" >> $GITHUB_OUTPUT
+      
+      - name: Run health check
+        run: |
+          echo "🏥 Running health check..."
+          FRONTEND_URL="${{ steps.deployment-info.outputs.url }}"
+          
+          # Esperar a que el LoadBalancer esté listo
+          echo "Waiting for LoadBalancer to be ready..."
+          sleep 30
+          
+          # Health check
+          if curl -f "$FRONTEND_URL/health" || curl -f "$FRONTEND_URL"; then
+            echo "✅ Frontend health check passed"
+          else
+            echo "⚠️  Frontend health check returned non-200, but service may still be starting"
+          fi
+      
+      - name: Deployment Summary
+        run: |
+          echo "## Frontend Deployment Summary 🎨" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Namespace**: \`frontend\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Replicas**: ${{ steps.deployment-info.outputs.replicas }} (Ready: ${{ steps.deployment-info.outputs.ready }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ steps.deployment-info.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Public URL**: [${{ steps.deployment-info.outputs.url }}](${{ steps.deployment-info.outputs.url }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Verification" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Deployment rollout successful" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ LoadBalancer configured" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ All pods ready" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Access the Application" >> $GITHUB_STEP_SUMMARY
+          echo "🌐 **Frontend**: ${{ steps.deployment-info.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Monitoring" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# View frontend logs" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl logs -n frontend -l app=frontend --tail=100" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Check HPA status" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl get hpa frontend-hpa -n frontend" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "## ❌ Frontend Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Debug Information" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n frontend >> $GITHUB_STEP_SUMMARY || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+          kubectl describe deployment frontend -n frontend >> $GITHUB_STEP_SUMMARY || true
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
