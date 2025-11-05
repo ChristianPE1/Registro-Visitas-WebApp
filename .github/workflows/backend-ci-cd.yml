@@ -168,12 +168,18 @@ jobs:
           pip install -r requirements.txt
       
       - name: Pulumi refresh (handle unreachable clusters)
+        working-directory: infrastructure-gcp-deploy
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_K8S_DELETE_UNREACHABLE: "true"
         run: |
           pulumi stack select ChristianPE1-org/production
           pulumi refresh --yes || echo "Refresh completed with warnings"
       
       - name: Update backend image in Pulumi config
         working-directory: infrastructure-gcp-deploy
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
           pulumi config set backend_image "${{ needs.build-and-push.outputs.image_url }}"
       

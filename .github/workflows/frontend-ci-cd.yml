@@ -178,6 +178,8 @@ jobs:
       
       - name: Update frontend image in Pulumi config
         working-directory: infrastructure-gcp-deploy
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
           pulumi config set frontend_image "${{ needs.build-and-push.outputs.image_url }}"
       
