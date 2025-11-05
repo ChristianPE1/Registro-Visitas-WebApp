@@ -141,7 +141,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: preview
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-base
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
@@ -151,7 +151,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: up
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-base
           upsert: true
         env:
@@ -211,7 +211,7 @@ jobs:
       - name: Configure DB password
         working-directory: infrastructure-gcp-db
         run: |
-          pulumi stack select production
+          pulumi stack select ChristianPE1-org/production
           pulumi config set --secret db_admin_password "${{ secrets.DB_ADMIN_PASSWORD }}"
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
@@ -221,7 +221,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: preview
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-db
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
@@ -231,7 +231,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: up
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-db
           upsert: true
         env:
@@ -305,7 +305,7 @@ jobs:
       - name: Configure secrets
         working-directory: infrastructure-gcp-deploy
         run: |
-          pulumi stack select production
+          pulumi stack select ChristianPE1-org/production
           pulumi config set --secret db_admin_password "${{ secrets.DB_ADMIN_PASSWORD }}"
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
@@ -323,7 +323,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: preview
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-deploy
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
@@ -333,7 +333,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: up
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-deploy
           upsert: true
         env:

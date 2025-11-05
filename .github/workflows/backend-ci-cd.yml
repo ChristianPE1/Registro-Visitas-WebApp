@@ -168,12 +168,8 @@ jobs:
           pip install -r requirements.txt
       
       - name: Pulumi refresh (handle unreachable clusters)
-        working-directory: infrastructure-gcp-deploy
-        env:
-          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-          PULUMI_K8S_DELETE_UNREACHABLE: "true"
         run: |
-          pulumi stack select production
+          pulumi stack select ChristianPE1-org/production
           pulumi refresh --yes || echo "Refresh completed with warnings"
       
       - name: Update backend image in Pulumi config
@@ -186,7 +182,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: preview
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-deploy
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
@@ -196,7 +192,7 @@ jobs:
         uses: pulumi/actions@v5
         with:
           command: up
-          stack-name: production
+          stack-name: ChristianPE1-org/production
           work-dir: infrastructure-gcp-deploy
           upsert: true
         env:
