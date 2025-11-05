@@ -87,7 +87,7 @@ function App() {
     <div className="App">
       <header className="header">
         <h1>Sistema de Autoscaling</h1>
-        <p>Demostración de autoscaling en Kubernetes</p>
+        <p>Demostración de autoscaling en Kubernetes con CI/CD</p>
       </header>
 
       <div className="container">
