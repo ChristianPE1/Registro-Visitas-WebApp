@@ -36,7 +36,3 @@ pulumi stack output
 echo "URL del Frontend:"
 FRONTEND_URL=$(pulumi stack output frontend_url 2>/dev/null || echo "Pendiente...")
 echo "   $FRONTEND_URL"
-
-echo "=================================================="
-echo "✅ VERIFICACIÓN COMPLETA"
-echo "=================================================="

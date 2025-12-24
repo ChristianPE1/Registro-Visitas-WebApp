@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """
-Script ULTRA AGRESIVO - Usa múltiples procesos para saturar completamente el CPU.
-Este script ejecuta múltiples instancias del script asyncio en paralelo.
 """
 import multiprocessing as mp
 import asyncio
@@ -94,15 +92,12 @@ def run_worker(worker_id, duration, return_dict):
     return_dict[worker_id] = stats
 
 def main():
-    print("\n" + "="*80)
-    print(f"CARGA ULTRA AGRESIVA")
-    print("="*80)
+    print(f"Prueba de Estres")
     print(f"Target: {BASE_URL}")
     print(f"Workers: {WORKERS} procesos paralelos")
     print(f"Concurrencia por worker: {CONCURRENT_PER_WORKER}")
     print(f"Duración: {DURATION_SECONDS}s")
     print(f"Carga total simultánea: {WORKERS * CONCURRENT_PER_WORKER} peticiones")
-    print("="*80)
     
     # Verificar conectividad
     print("\nVerificando servidor...")
@@ -112,7 +107,7 @@ def main():
         if r.status_code == 200:
             print("✓ Servidor OK\n")
     except:
-        print("⚠ No se pudo verificar, continuando de todas formas...\n")
+        print("⚠ No se pudo verificar\n")
     
     print(f"Iniciando {WORKERS} workers en 3 segundos...\n")
     time.sleep(3)
@@ -142,16 +137,14 @@ def main():
     total_post = sum(s['post'] for s in return_dict.values())
     total = total_success + total_failed
     
-    print("\n" + "="*80)
-    print("RESULTADOS FINALES")
-    print("="*80)
-    print(f"Total peticiones: {total:,}")
+    print("\nRESULTADOS FINALES")
+    print(f"\nTotal peticiones: {total:,}")
     print(f"Exitosas: {total_success:,} ({total_success/total*100:.1f}%)")
     print(f"Fallidas: {total_failed:,}")
     print(f"GET: {total_get:,} | POST: {total_post:,}")
     print(f"Tiempo: {elapsed:.1f}s")
     print(f"Velocidad promedio: {total/elapsed:.1f} req/s")
-    print("="*80 + "\n")
+    print("\n")
 
 if __name__ == "__main__":
     try:

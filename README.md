@@ -157,7 +157,7 @@ pulumi stack output frontend_url
 
 ## Verificación
 
-**IMPORTANTE**: `kubectl` solo se usa para **observar** lo que Pulumi creó. Todo se ejecuta desde tu laptop local.
+**IMPORTANTE**: `kubectl` solo se usa para **observar** lo que Pulumi creó. Todo se ejecuta desde tu equipo local.
 
 ```bash
 # 1. Obtener credenciales del cluster (una sola vez)
@@ -382,60 +382,8 @@ git push
 # 6. Revisa reporte en el summary del job
 ```
 
-### Features de Seguridad y Confiabilidad
 
-#### Retry Logic para Docker Push
-```yaml
-# Reintentos automáticos con backoff exponencial
-- Intento 1: Push directo
-- Intento 2: Espera 10s y reintenta
-- Intento 3: Espera 20s y reintenta
-- Intento 4: Espera 40s y reintenta
-```
-
-#### Manejo de Cluster Unreachable
-```yaml
-# Limpieza automática de recursos huérfanos
-env:
-  PULUMI_K8S_DELETE_UNREACHABLE: "true"
-```
-
-#### Health Checks Automáticos
-```yaml
-# Backend: Port-forward + curl
-- kubectl port-forward → http://localhost:5000/health
-# Frontend: LoadBalancer + curl
-- curl http://<EXTERNAL-IP>/health
-```
-
-### Monitoreo de Workflows
-
-Los workflows generan **summaries detallados** con información útil:
-
-- **Backend/Frontend CI/CD**:
-  - Image URL en Artifact Registry
-  - Número de réplicas (actual vs deseadas)
-  - Status de deployment
-  - Comandos para monitoreo manual
-
-- **Infrastructure CI/CD**:
-  - Stack desplegado
-  - Cluster endpoints
-  - Frontend URL pública
-  - Comandos kubectl de verificación
-
-- **Load Test**:
-  - Estado inicial del cluster (nodos, pods, HPAs)
-  - Estado post-carga (escalado observado)
-  - Eventos de scaling recientes
-  - Utilización de recursos (CPU/Memoria)
-  - Summary con verificación de criterios
-
-## Autor
-
-Christian PE  
-Proyecto de demostración de IaC y Autoscaling
 
 ## Licencia
 
-MIT License
+Este proyecto está licenciado bajo la Licencia MIT.

@@ -34,13 +34,8 @@ bash "$(dirname "$0")/gcp-deploy-5-verify.sh"
 
 
 echo ""
-echo "====================================="
 echo "DESPLIEGUE COMPLETADO EXITOSAMENTE"
-echo "====================================="
-echo ""
 echo "Aplicación lista en:"
 cd "$(dirname "$0")/../infrastructure-gcp-deploy"
 source venv/bin/activate 2>/dev/null || true
 pulumi stack output frontend_url
-echo ""
-echo "====================================="

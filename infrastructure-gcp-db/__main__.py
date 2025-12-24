@@ -25,7 +25,7 @@ base_stack = StackReference("ChristianPE1-org/gcp-base/production")
 gke_zone = base_stack.get_output("zone")
 
 # Cloud SQL Instance - PostgreSQL
-# Tier: db-f1-micro (la instancia más pequeña y económica)
+# Tier: db-f1-micro 
 postgres_instance = gcp.sql.DatabaseInstance(
     f"{project_name}-postgres",
     name=f"{project_name}-postgres",
@@ -33,10 +33,9 @@ postgres_instance = gcp.sql.DatabaseInstance(
     region=region,
     
     settings=gcp.sql.DatabaseInstanceSettingsArgs(
-        tier="db-f1-micro",  # 1 vCPU compartida, 0.6 GB RAM (más barato)
-        
-        # Configuración de disponibilidad (deshabilitada para ahorrar)
-        availability_type="ZONAL",  # Single-zone (no HA para ahorrar)
+        tier="db-f1-micro",  # 1 vCPU compartida, 0.6 GB RAM
+        # Configuración de disponibilidad
+        availability_type="ZONAL",  # Single-zone
         
         # Backups
         backup_configuration=gcp.sql.DatabaseInstanceSettingsBackupConfigurationArgs(
@@ -51,7 +50,7 @@ postgres_instance = gcp.sql.DatabaseInstance(
             authorized_networks=[
                 gcp.sql.DatabaseInstanceSettingsIpConfigurationAuthorizedNetworkArgs(
                     name="allow-all",
-                    value="0.0.0.0/0"  # Permitir todas las IPs (para desarrollo)
+                    value="0.0.0.0/0"  # Permitir todas las IPs
                 )
             ]
         ),
@@ -59,7 +58,7 @@ postgres_instance = gcp.sql.DatabaseInstance(
         # Configuración de disco
         disk_autoresize=True,
         disk_size=10,  # 10 GB (mínimo)
-        disk_type="PD_HDD",  # Disco HDD (más barato que SSD)
+        disk_type="PD_HDD",  # Disco HDD
         
         # Flags de PostgreSQL
         database_flags=[
@@ -71,7 +70,7 @@ postgres_instance = gcp.sql.DatabaseInstance(
     ),
     
     # Protección contra eliminación accidental
-    deletion_protection=False  # False para poder destruir fácilmente en desarrollo
+    deletion_protection=False  # False para poder destruir fácilmente
 )
 
 # Usuario administrador de PostgreSQL
